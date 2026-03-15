@@ -45,32 +45,25 @@ pub enum CsgOp {
 // CSG interval operations
 // ---------------------------------------------------------------------------
 
-/// Union of two sorted interval lists.
-/// Points in result are points in A or in B.
+/// Union of two interval lists (concatenation).
+/// The point-set semantics is: a point is in the union iff it's in A or B.
 pub open spec fn csg_union_intervals<T: OrderedRing>(
     a: Seq<RayInterval<T>>, b: Seq<RayInterval<T>>,
 ) -> Seq<RayInterval<T>> {
-    // Merge and combine overlapping intervals.
-    // Full implementation would merge-sort + coalesce.
-    // For spec purposes, define the point set:
-    a.add(b) // simplified: concatenation (runtime would merge properly)
+    a.add(b)
 }
 
 /// Intersection of two sorted interval lists.
-/// Points in result are points in A and in B.
 pub open spec fn csg_intersect_intervals<T: OrderedRing>(
     a: Seq<RayInterval<T>>, b: Seq<RayInterval<T>>,
 ) -> Seq<RayInterval<T>> {
-    // Pairwise overlap of intervals from a and b.
-    Seq::empty() // placeholder — proper spec requires sweep-line
+    Seq::empty() // placeholder for proper sweep-line spec
 }
 
 /// Difference of two sorted interval lists: A minus B.
-/// Points in result are points in A but not in B.
 pub open spec fn csg_difference_intervals<T: OrderedRing>(
     a: Seq<RayInterval<T>>, b: Seq<RayInterval<T>>,
 ) -> Seq<RayInterval<T>> {
-    // A minus B = A intersect complement(B).
     Seq::empty() // placeholder
 }
 
@@ -79,7 +72,10 @@ pub open spec fn t_in_intervals<T: OrderedRing>(t: T, ivs: Seq<RayInterval<T>>) 
     exists|i: int| 0 <= i < ivs.len() && ivs[i].t_enter.le(t) && t.le(ivs[i].t_exit)
 }
 
-/// Point-set correctness of union: t in union iff t in A or t in B.
+/// Point-set correctness of union: t in union(A,B) iff t in A or t in B.
+///
+/// Since union is concatenation, an index into a.add(b) either falls in the
+/// a-range [0, a.len()) or the b-range [a.len(), a.len()+b.len()).
 pub proof fn lemma_csg_union_correct<T: OrderedRing>(
     t: T, a: Seq<RayInterval<T>>, b: Seq<RayInterval<T>>,
 )
@@ -87,7 +83,39 @@ pub proof fn lemma_csg_union_correct<T: OrderedRing>(
         t_in_intervals(t, csg_union_intervals(a, b)) <==>
             (t_in_intervals(t, a) || t_in_intervals(t, b)),
 {
-    assume(false); // TODO: prove from merge definition
+    let ab = a.add(b);
+
+    // Forward: t in ab → t in a or t in b
+    if t_in_intervals(t, ab) {
+        let i = choose|i: int| 0 <= i < ab.len() && ab[i].t_enter.le(t) && t.le(ab[i].t_exit);
+        if i < a.len() as int {
+            // Index in a's range: ab[i] == a[i]
+            assert(a[i].t_enter.le(t) && t.le(a[i].t_exit));
+            assert(t_in_intervals(t, a));
+        } else {
+            // Index in b's range: ab[i] == b[i - a.len()]
+            let j = i - a.len() as int;
+            assert(0 <= j < b.len());
+            assert(b[j].t_enter.le(t) && t.le(b[j].t_exit));
+            assert(t_in_intervals(t, b));
+        }
+    }
+
+    // Backward: t in a or t in b → t in ab
+    if t_in_intervals(t, a) {
+        let i = choose|i: int| 0 <= i < a.len() && a[i].t_enter.le(t) && t.le(a[i].t_exit);
+        assert(0 <= i < ab.len());
+        assert(ab[i].t_enter.le(t) && t.le(ab[i].t_exit));
+        assert(t_in_intervals(t, ab));
+    }
+    if t_in_intervals(t, b) {
+        let j = choose|j: int| 0 <= j < b.len() && b[j].t_enter.le(t) && t.le(b[j].t_exit);
+        let i = j + a.len() as int;
+        assert(0 <= i < ab.len());
+        assert(ab[i] == b[j]);
+        assert(ab[i].t_enter.le(t) && t.le(ab[i].t_exit));
+        assert(t_in_intervals(t, ab));
+    }
 }
 
 } // verus!

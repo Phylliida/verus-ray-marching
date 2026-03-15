@@ -120,10 +120,12 @@ pub open spec fn ray_hits_fractal<T: OrderedField>(
         ray_hits_box(ray, desc.base_aabb)
     } else {
         // Test each child: transform ray into child's local frame, recurse
-        exists|i: int| 0 <= i < desc.transforms.len() && {
-            let local_ray = inverse_transform_ray(desc.transforms[i], ray);
-            ray_hits_fractal(local_ray, desc, (depth - 1) as nat)
-        }
+        exists|i: int| 0 <= i < desc.transforms.len() &&
+            #[trigger] ray_hits_fractal(
+                inverse_transform_ray(desc.transforms[i], ray),
+                desc,
+                (depth - 1) as nat,
+            )
     }
 }
 
