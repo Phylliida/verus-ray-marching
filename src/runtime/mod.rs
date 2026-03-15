@@ -9,5 +9,7 @@ pub mod types;
 pub mod ray_plane;
 pub mod ray_sphere;
 pub mod ray_box;
+pub mod ray_cylinder;
 pub mod normals;
 pub mod fractal;
+pub mod scene;

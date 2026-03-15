@@ -108,37 +108,38 @@ pub open spec fn fractal_leaf_aabbs<T: OrderedField>(
 // Recursive ray-fractal intersection
 // ---------------------------------------------------------------------------
 
+/// Does the ray hit any child from index `from` onward?
+/// Linear scan — avoids `exists` to enable Z3 unfolding in exec proofs.
+pub open spec fn ray_hits_children<T: OrderedField>(
+    ray: Ray3<T>, desc: FractalDesc<T>, depth: nat, from: nat,
+) -> bool
+    recommends depth > 0
+    decreases depth, desc.transforms.len() - from
+    when depth > 0
+{
+    if from >= desc.transforms.len() {
+        false
+    } else {
+        ray_hits_fractal(
+            inverse_transform_ray(desc.transforms[from as int], ray),
+            desc,
+            (depth - 1) as nat,
+        ) || ray_hits_children(ray, desc, depth, from + 1)
+    }
+}
+
 /// Does the ray hit any leaf of the fractal at the given depth?
 /// Uses AABB pruning at each level of recursion.
 pub open spec fn ray_hits_fractal<T: OrderedField>(
     ray: Ray3<T>, desc: FractalDesc<T>, depth: nat,
 ) -> bool
-    decreases depth, 0nat,
+    decreases depth, desc.transforms.len() + 1,
 {
     if depth == 0 {
-        // At leaf: test against base AABB
         ray_hits_box(ray, desc.base_aabb)
     } else {
-        // Test each child: transform ray into child's local frame, recurse
-        exists|i: int| 0 <= i < desc.transforms.len() &&
-            #[trigger] ray_hits_fractal(
-                inverse_transform_ray(desc.transforms[i], ray),
-                desc,
-                (depth - 1) as nat,
-            )
+        ray_hits_children(ray, desc, depth, 0)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Unfolding helpers (needed by exec layer; open spec + decreases doesn't
-// always auto-unfold with variable depth arguments)
-// ---------------------------------------------------------------------------
-
-pub proof fn lemma_ray_hits_fractal_base<T: OrderedField>(
-    ray: Ray3<T>, desc: FractalDesc<T>,
-)
-    ensures
-        ray_hits_fractal(ray, desc, 0) == ray_hits_box(ray, desc.base_aabb),
-{}
 
 } // verus!
