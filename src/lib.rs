@@ -34,4 +34,5 @@ pub mod sierpinski;
 #[cfg(verus_keep_ghost)]
 pub mod dispatch;
 
+#[cfg(verus_keep_ghost)]
 pub mod runtime;

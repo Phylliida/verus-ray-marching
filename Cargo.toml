@@ -13,6 +13,21 @@ verus-bigint = { path = "../verus-bigint" }
 verus-quadratic-extension = { path = "../verus-quadratic-extension" }
 verus-cutedsl = { path = "../verus-cutedsl" }
 verus-vulkan = { path = "../verus-vulkan", default-features = false }
+builtin = { package = "verus_builtin", path = "../verus/source/builtin" }
+
+# Windowing deps (for viewer binaries)
+ash = { version = "0.38", optional = true }
+winit = { version = "0.30", optional = true }
+ash-window = { version = "0.13", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
+[features]
+viewer = ["ash", "winit", "ash-window", "raw-window-handle"]
+
+[[bin]]
+name = "menger_viewer"
+path = "src/bin/menger_viewer.rs"
+required-features = ["viewer"]
 
 [package.metadata.verus]
 verify = true
