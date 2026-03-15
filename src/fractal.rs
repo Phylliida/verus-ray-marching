@@ -113,7 +113,7 @@ pub open spec fn fractal_leaf_aabbs<T: OrderedField>(
 pub open spec fn ray_hits_fractal<T: OrderedField>(
     ray: Ray3<T>, desc: FractalDesc<T>, depth: nat,
 ) -> bool
-    decreases depth,
+    decreases depth, 0nat,
 {
     if depth == 0 {
         // At leaf: test against base AABB
@@ -128,5 +128,17 @@ pub open spec fn ray_hits_fractal<T: OrderedField>(
             )
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unfolding helpers (needed by exec layer; open spec + decreases doesn't
+// always auto-unfold with variable depth arguments)
+// ---------------------------------------------------------------------------
+
+pub proof fn lemma_ray_hits_fractal_base<T: OrderedField>(
+    ray: Ray3<T>, desc: FractalDesc<T>,
+)
+    ensures
+        ray_hits_fractal(ray, desc, 0) == ray_hits_box(ray, desc.base_aabb),
+{}
 
 } // verus!
