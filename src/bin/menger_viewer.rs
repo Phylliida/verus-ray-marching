@@ -3,13 +3,24 @@
 //! The GLSL compute shader mirrors the verified `ray_hits_fractal` algorithm
 //! (iterative IFS descent with AABB pruning) from verus-ray-marching.
 //!
+//! Controls:
+//!   WASD      — fly forward/left/back/right
+//!   Space     — fly up
+//!   LShift    — fly down
+//!   LCtrl     — speed boost (5×)
+//!   Mouse     — look around (click to capture, Escape to release)
+//!   +/=  -/_  — zoom in/out (FOV)
+//!   ] / [     — increase/decrease fractal depth (1–8)
+//!
 //! Run: `cargo run --bin menger_viewer --features vulkan-backend`
 
+use std::collections::HashSet;
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{DeviceEvent, DeviceId, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
-    window::{Window, WindowId, WindowAttributes},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{CursorGrabMode, Window, WindowId, WindowAttributes},
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -36,12 +47,15 @@ mod vulkan {
     use verus_vulkan::runtime::device::RuntimeDevice;
     use verus_vulkan::runtime::queue::RuntimeQueue;
     use verus_vulkan::runtime::framebuffer::RuntimeImageView;
+    use verus_vulkan::runtime::pipeline::RuntimeComputePipeline;
+    use verus_vulkan::runtime::descriptor::{RuntimeDescriptorSetLayout, RuntimeDescriptorPool, RuntimeDescriptorSet};
 
     #[repr(C)]
     struct PushConstants {
-        width: u32,
-        height: u32,
-        time: f32,
+        eye: [f32; 3],      fov: f32,
+        forward: [f32; 3],  width: u32,
+        right: [f32; 3],    height: u32,
+        up: [f32; 3],       max_depth: u32,
     }
 
     pub struct VkState {
@@ -54,11 +68,11 @@ mod vulkan {
         swapchain_images: Vec<u64>,
         image_views: Vec<RuntimeImageView>,
         // Compute-specific:
-        compute_pipeline: vk::Pipeline,
-        pipeline_layout: vk::PipelineLayout,
-        descriptor_set_layout: vk::DescriptorSetLayout,
-        descriptor_pool: vk::DescriptorPool,
-        descriptor_sets: Vec<vk::DescriptorSet>,
+        compute_pipeline: RuntimeComputePipeline,
+        pipeline_layout_handle: u64,
+        descriptor_set_layout: RuntimeDescriptorSetLayout,
+        descriptor_pool: RuntimeDescriptorPool,
+        descriptor_sets: Vec<RuntimeDescriptorSet>,
         shader_module: RuntimeShaderModule,
         // Standard:
         command_pool: RuntimeCommandPool,
@@ -69,7 +83,17 @@ mod vulkan {
         _format: vk::Format,
         width: u32,
         height: u32,
-        start_time: Instant,
+        // Camera
+        pub eye: [f32; 3],
+        pub yaw: f32,
+        pub pitch: f32,
+        pub fov: f32,
+        pub move_speed: f32,
+        pub max_depth: u32,
+        // Input
+        pub keys_held: HashSet<KeyCode>,
+        pub last_frame_time: Instant,
+        pub mouse_captured: bool,
     }
 
     impl VkState {
@@ -105,7 +129,7 @@ mod vulkan {
             let surface = ffi::vk_create_surface(&ctx, Ghost::assume_new(), raw_surface.as_raw());
 
             // 4. Device + queue
-            let mut dev = ffi::vk_create_device(&ctx, Ghost::assume_new());
+            let dev = ffi::vk_create_device(&ctx, Ghost::assume_new());
             let queue = ffi::vk_get_device_queue(&ctx, 0, 0, Ghost::assume_new());
 
             // 5. Surface format — use UNORM (not SRGB) for storage image compatibility
@@ -120,33 +144,19 @@ mod vulkan {
                 .unwrap_or(&surface_formats[0])
                 .format;
 
-            // 6. Swapchain — created with raw ash for STORAGE | COLOR_ATTACHMENT usage
-            let image_count = 2u32;
-            let swapchain_ci = vk::SwapchainCreateInfoKHR::default()
-                .surface(raw_surface)
-                .min_image_count(image_count)
-                .image_format(format)
-                .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
-                .image_extent(vk::Extent2D { width, height })
-                .image_array_layers(1)
-                .image_usage(
-                    vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                )
-                .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-                .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
-                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                .present_mode(vk::PresentModeKHR::FIFO)
-                .clipped(true);
-            let raw_swapchain = unsafe {
-                ctx.swapchain_loader.create_swapchain(&swapchain_ci, None)
-            }
-            .expect("Failed to create swapchain (STORAGE usage may not be supported)");
-
-            // Wrap in RuntimeSwapchain for ffi compatibility
-            let swapchain = RuntimeSwapchain {
-                handle: raw_swapchain.as_raw(),
-                state: Ghost::assume_new(),
-            };
+            // 6. Swapchain — STORAGE | COLOR_ATTACHMENT usage for compute write
+            let image_count = 2u64;
+            let swapchain = ffi::vk_create_swapchain(
+                &ctx,
+                Ghost::assume_new(),
+                image_count,
+                raw_surface.as_raw(),
+                format.as_raw() as u32,
+                width,
+                height,
+                vk::PresentModeKHR::FIFO.as_raw() as u32,
+                (vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT).as_raw(),
+            );
 
             // 7. Swapchain images + views
             let swapchain_images = ffi::vk_get_swapchain_images(&ctx, &swapchain);
@@ -163,28 +173,24 @@ mod vulkan {
             }
 
             // 8. Descriptor set layout: 1 storage image binding at COMPUTE stage
-            let binding = vk::DescriptorSetLayoutBinding::default()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::COMPUTE);
-            let dsl_ci = vk::DescriptorSetLayoutCreateInfo::default()
-                .bindings(std::slice::from_ref(&binding));
-            let descriptor_set_layout = unsafe {
-                ctx.device.create_descriptor_set_layout(&dsl_ci, None)
-            }
-            .expect("Failed to create descriptor set layout");
-
-            // 9. Pipeline layout with push constants (12 bytes at COMPUTE stage)
-            let dsl_handle = descriptor_set_layout.as_raw();
-            let pipeline_layout = vk::PipelineLayout::from_raw(
-                ffi::vk_create_pipeline_layout_push(
-                    &ctx,
-                    &[dsl_handle],
+            let descriptor_set_layout = ffi::vk_create_descriptor_set_layout_typed(
+                &ctx,
+                Ghost::assume_new(),
+                &[(
+                    0, // binding number
+                    vk::DescriptorType::STORAGE_IMAGE.as_raw() as u32,
+                    1, // descriptor count
                     vk::ShaderStageFlags::COMPUTE.as_raw(),
-                    0,
-                    std::mem::size_of::<PushConstants>() as u32,
-                ),
+                )],
+            );
+
+            // 9. Pipeline layout with push constants (64 bytes at COMPUTE stage)
+            let pipeline_layout_handle = ffi::vk_create_pipeline_layout_push(
+                &ctx,
+                &[descriptor_set_layout.handle],
+                vk::ShaderStageFlags::COMPUTE.as_raw(),
+                0,
+                std::mem::size_of::<PushConstants>() as u32,
             );
 
             // 10. Shader module
@@ -192,62 +198,48 @@ mod vulkan {
             let shader_module = ffi::vk_create_shader_module(&ctx, Ghost::assume_new(), &spv_code);
 
             // 11. Compute pipeline
-            let stage = vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::COMPUTE)
-                .module(vk::ShaderModule::from_raw(shader_module.handle))
-                .name(c"main");
-            let pipeline_ci = vk::ComputePipelineCreateInfo::default()
-                .stage(stage)
-                .layout(pipeline_layout);
-            let compute_pipeline = unsafe {
-                ctx.device
-                    .create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
-            }
-            .expect("Failed to create compute pipeline")[0];
+            let compute_pipeline = ffi::vk_create_compute_pipeline(
+                &ctx,
+                Ghost::assume_new(),
+                pipeline_layout_handle,
+                shader_module.handle,
+            );
 
             // 12. Descriptor pool + sets
-            let pool_size = vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::STORAGE_IMAGE,
-                descriptor_count: image_count,
-            };
-            let pool_ci = vk::DescriptorPoolCreateInfo::default()
-                .max_sets(image_count)
-                .pool_sizes(std::slice::from_ref(&pool_size));
-            let descriptor_pool = unsafe {
-                ctx.device.create_descriptor_pool(&pool_ci, None)
-            }
-            .expect("Failed to create descriptor pool");
+            let mut descriptor_pool = ffi::vk_create_descriptor_pool_typed(
+                &ctx,
+                Ghost::assume_new(),
+                image_count,
+                &[(vk::DescriptorType::STORAGE_IMAGE.as_raw() as u32, image_count as u32)],
+            );
 
-            // Allocate one descriptor set per swapchain image
-            let layouts: Vec<vk::DescriptorSetLayout> =
-                (0..image_count).map(|_| descriptor_set_layout).collect();
-            let alloc_info = vk::DescriptorSetAllocateInfo::default()
-                .descriptor_pool(descriptor_pool)
-                .set_layouts(&layouts);
-            let descriptor_sets = unsafe {
-                ctx.device.allocate_descriptor_sets(&alloc_info)
-            }
-            .expect("Failed to allocate descriptor sets");
-
-            // Update each descriptor set to point at its swapchain image view
-            for (i, &ds) in descriptor_sets.iter().enumerate() {
-                let image_info = vk::DescriptorImageInfo {
-                    sampler: vk::Sampler::null(),
-                    image_view: vk::ImageView::from_raw(image_views[i].handle),
-                    image_layout: vk::ImageLayout::GENERAL,
-                };
-                let write = vk::WriteDescriptorSet::default()
-                    .dst_set(ds)
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                    .image_info(std::slice::from_ref(&image_info));
-                unsafe { ctx.device.update_descriptor_sets(&[write], &[]) };
+            // Allocate one descriptor set per swapchain image + update each
+            let mut descriptor_sets = Vec::new();
+            for i in 0..image_count as usize {
+                let mut ds = ffi::vk_allocate_descriptor_sets(
+                    &ctx,
+                    &mut descriptor_pool,
+                    Ghost::assume_new(),
+                    Ghost::assume_new(),
+                    descriptor_set_layout.handle,
+                );
+                ffi::vk_update_descriptor_sets_image(
+                    &ctx,
+                    &mut ds,
+                    Ghost::assume_new(),
+                    Ghost::assume_new(),
+                    0, // binding index
+                    vk::DescriptorType::STORAGE_IMAGE.as_raw() as u32,
+                    image_views[i].handle,
+                    vk::ImageLayout::GENERAL.as_raw() as u32,
+                );
+                descriptor_sets.push(ds);
             }
 
             // 13. Command pool + buffers
             let command_pool = ffi::vk_create_command_pool(&ctx, Ghost::assume_new(), 0, true);
             let mut command_buffers = Vec::new();
-            for _ in 0..image_count {
+            for _ in 0..image_count as usize {
                 let cb = ffi::vk_allocate_command_buffer(
                     &ctx,
                     Ghost::assume_new(),
@@ -261,10 +253,21 @@ mod vulkan {
             let image_available_sem = ffi::vk_create_semaphore(&ctx, Ghost::assume_new());
             let render_finished_sem = ffi::vk_create_semaphore(&ctx, Ghost::assume_new());
 
+            // Camera: initial position looking at center of sponge
+            let eye = [2.0f32, 1.0, 2.0];
+            // Compute yaw/pitch aimed at sponge center (0.5, 0.5, 0.5)
+            let dx = 0.5 - eye[0];
+            let dy = 0.5 - eye[1];
+            let dz = 0.5 - eye[2];
+            let yaw = dz.atan2(dx);
+            let pitch = dy.atan2((dx * dx + dz * dz).sqrt());
+
             eprintln!(
                 "Menger viewer initialized: {}x{}, format {:?}",
                 width, height, format
             );
+            eprintln!("Controls: WASD=move, Mouse=look (click to capture, Esc=release)");
+            eprintln!("          Space/LShift=up/down, LCtrl=boost, +/-=FOV, ]/[=depth");
 
             VkState {
                 ctx,
@@ -276,7 +279,7 @@ mod vulkan {
                 swapchain_images,
                 image_views,
                 compute_pipeline,
-                pipeline_layout,
+                pipeline_layout_handle,
                 descriptor_set_layout,
                 descriptor_pool,
                 descriptor_sets,
@@ -289,7 +292,15 @@ mod vulkan {
                 _format: format,
                 width,
                 height,
-                start_time: Instant::now(),
+                eye,
+                yaw,
+                pitch,
+                fov: 0.8,
+                move_speed: 1.5,
+                max_depth: 4,
+                keys_held: HashSet::new(),
+                last_frame_time: Instant::now(),
+                mouse_captured: false,
             }
         }
 
@@ -302,7 +313,71 @@ mod vulkan {
             // TODO: recreate swapchain + descriptor sets for resize
         }
 
+        fn camera_vectors(&self) -> ([f32; 3], [f32; 3], [f32; 3]) {
+            let (sp, cp) = (self.pitch.sin(), self.pitch.cos());
+            let (sy, cy) = (self.yaw.sin(), self.yaw.cos());
+
+            let forward = [cp * cy, sp, cp * sy];
+            // right = normalize(cross(forward, world_up))
+            // cross([fx,fy,fz], [0,1,0]) = [-fz, 0, fx]
+            let rx = -forward[2];
+            let rz = forward[0];
+            let rlen = (rx * rx + rz * rz).sqrt();
+            let right = if rlen > 1e-6 {
+                [rx / rlen, 0.0, rz / rlen]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
+            // up = cross(right, forward)
+            let up = [
+                right[1] * forward[2] - right[2] * forward[1],
+                right[2] * forward[0] - right[0] * forward[2],
+                right[0] * forward[1] - right[1] * forward[0],
+            ];
+
+            (forward, right, up)
+        }
+
+        pub fn update_camera(&mut self) {
+            let dt = self.last_frame_time.elapsed().as_secs_f32();
+            self.last_frame_time = Instant::now();
+
+            let speed = if self.keys_held.contains(&KeyCode::ControlLeft) {
+                self.move_speed * 5.0
+            } else {
+                self.move_speed
+            };
+
+            let (forward, right, _up) = self.camera_vectors();
+
+            // Forward/backward
+            if self.keys_held.contains(&KeyCode::KeyW) {
+                for i in 0..3 { self.eye[i] += forward[i] * speed * dt; }
+            }
+            if self.keys_held.contains(&KeyCode::KeyS) {
+                for i in 0..3 { self.eye[i] -= forward[i] * speed * dt; }
+            }
+            // Strafe left/right
+            if self.keys_held.contains(&KeyCode::KeyA) {
+                for i in 0..3 { self.eye[i] -= right[i] * speed * dt; }
+            }
+            if self.keys_held.contains(&KeyCode::KeyD) {
+                for i in 0..3 { self.eye[i] += right[i] * speed * dt; }
+            }
+            // World up/down
+            if self.keys_held.contains(&KeyCode::Space) {
+                self.eye[1] += speed * dt;
+            }
+            if self.keys_held.contains(&KeyCode::ShiftLeft) {
+                self.eye[1] -= speed * dt;
+            }
+        }
+
         pub fn render(&mut self) {
+            self.update_camera();
+
+            let (forward, right, up) = self.camera_vectors();
+
             // Wait for previous frame
             ffi::vk_wait_for_fences(
                 &self.ctx,
@@ -322,15 +397,18 @@ mod vulkan {
             );
 
             let cb = &mut self.command_buffers[idx as usize];
-            let raw_cb = vk::CommandBuffer::from_raw(cb.handle);
-            let image = vk::Image::from_raw(self.swapchain_images[idx as usize]);
+            let image_handle = self.swapchain_images[idx as usize];
 
             // Push constant data
-            let elapsed = self.start_time.elapsed().as_secs_f32();
             let pc = PushConstants {
+                eye: self.eye,
+                fov: self.fov,
+                forward,
                 width: self.width,
+                right,
                 height: self.height,
-                time: elapsed,
+                up,
+                max_depth: self.max_depth,
             };
             let pc_bytes: &[u8] = unsafe {
                 std::slice::from_raw_parts(
@@ -343,58 +421,45 @@ mod vulkan {
             ffi::vk_begin_command_buffer(&self.ctx, cb);
 
             // Transition swapchain image: UNDEFINED → GENERAL (for compute write)
-            let barrier_to_general = vk::ImageMemoryBarrier::default()
-                .src_access_mask(vk::AccessFlags::empty())
-                .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
-                .old_layout(vk::ImageLayout::UNDEFINED)
-                .new_layout(vk::ImageLayout::GENERAL)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(image)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                });
-            unsafe {
-                self.ctx.device.cmd_pipeline_barrier(
-                    raw_cb,
-                    vk::PipelineStageFlags::TOP_OF_PIPE,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &[barrier_to_general],
-                );
-            }
+            ffi::vk_cmd_pipeline_barrier_image(
+                &self.ctx,
+                cb,
+                Ghost::assume_new(),
+                vk::PipelineStageFlags::TOP_OF_PIPE.as_raw(),
+                vk::PipelineStageFlags::COMPUTE_SHADER.as_raw(),
+                &[(
+                    image_handle,
+                    vk::ImageLayout::UNDEFINED.as_raw() as u32,
+                    vk::ImageLayout::GENERAL.as_raw() as u32,
+                    vk::AccessFlags::empty().as_raw(),
+                    vk::AccessFlags::SHADER_WRITE.as_raw(),
+                )],
+            );
 
             // Bind compute pipeline
             ffi::vk_cmd_bind_pipeline(
                 &self.ctx,
                 cb,
                 vk::PipelineBindPoint::COMPUTE.as_raw() as u32,
-                self.compute_pipeline.as_raw(),
+                self.compute_pipeline.handle,
             );
 
             // Bind descriptor set
-            unsafe {
-                self.ctx.device.cmd_bind_descriptor_sets(
-                    raw_cb,
-                    vk::PipelineBindPoint::COMPUTE,
-                    self.pipeline_layout,
-                    0,
-                    &[self.descriptor_sets[idx as usize]],
-                    &[],
-                );
-            }
+            ffi::vk_cmd_bind_descriptor_sets(
+                &self.ctx,
+                cb,
+                Ghost::assume_new(),
+                vk::PipelineBindPoint::COMPUTE.as_raw() as u32,
+                self.pipeline_layout_handle,
+                0,
+                &[self.descriptor_sets[idx as usize].handle],
+            );
 
             // Push constants
             ffi::ffi_cmd_push_constants(
                 &self.ctx,
                 cb.handle,
-                self.pipeline_layout.as_raw(),
+                self.pipeline_layout_handle,
                 vk::ShaderStageFlags::COMPUTE.as_raw(),
                 0,
                 pc_bytes,
@@ -403,35 +468,23 @@ mod vulkan {
             // Dispatch compute — ceil(width/16) x ceil(height/16) x 1
             let group_x = (self.width + 15) / 16;
             let group_y = (self.height + 15) / 16;
-            ffi::ffi_cmd_dispatch(&self.ctx, cb.handle, group_x, group_y, 1);
+            ffi::vk_cmd_dispatch(&self.ctx, cb, group_x, group_y, 1);
 
             // Transition swapchain image: GENERAL → PRESENT_SRC_KHR
-            let barrier_to_present = vk::ImageMemoryBarrier::default()
-                .src_access_mask(vk::AccessFlags::SHADER_WRITE)
-                .dst_access_mask(vk::AccessFlags::empty())
-                .old_layout(vk::ImageLayout::GENERAL)
-                .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(image)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                });
-            unsafe {
-                self.ctx.device.cmd_pipeline_barrier(
-                    raw_cb,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &[barrier_to_present],
-                );
-            }
+            ffi::vk_cmd_pipeline_barrier_image(
+                &self.ctx,
+                cb,
+                Ghost::assume_new(),
+                vk::PipelineStageFlags::COMPUTE_SHADER.as_raw(),
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE.as_raw(),
+                &[(
+                    image_handle,
+                    vk::ImageLayout::GENERAL.as_raw() as u32,
+                    vk::ImageLayout::PRESENT_SRC_KHR.as_raw() as u32,
+                    vk::AccessFlags::SHADER_WRITE.as_raw(),
+                    vk::AccessFlags::empty().as_raw(),
+                )],
+            );
 
             ffi::vk_end_command_buffer(&self.ctx, cb);
 
@@ -463,20 +516,14 @@ mod vulkan {
         pub fn destroy(&mut self) {
             unsafe {
                 let _ = self.ctx.device.device_wait_idle();
-                self.ctx.device.destroy_pipeline(self.compute_pipeline, None);
-                self.ctx
-                    .device
-                    .destroy_pipeline_layout(self.pipeline_layout, None);
+                self.ctx.device.destroy_pipeline(vk::Pipeline::from_raw(self.compute_pipeline.handle), None);
+                self.ctx.device.destroy_pipeline_layout(vk::PipelineLayout::from_raw(self.pipeline_layout_handle), None);
                 self.ctx.device.destroy_shader_module(
                     vk::ShaderModule::from_raw(self.shader_module.handle),
                     None,
                 );
-                self.ctx
-                    .device
-                    .destroy_descriptor_pool(self.descriptor_pool, None);
-                self.ctx
-                    .device
-                    .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+                self.ctx.device.destroy_descriptor_pool(vk::DescriptorPool::from_raw(self.descriptor_pool.handle), None);
+                self.ctx.device.destroy_descriptor_set_layout(vk::DescriptorSetLayout::from_raw(self.descriptor_set_layout.handle), None);
                 for iv in &self.image_views {
                     self.ctx
                         .device
@@ -523,6 +570,22 @@ struct App {
     state: Option<vulkan::VkState>,
 }
 
+impl App {
+    fn capture_mouse(&mut self, capture: bool) {
+        if let (Some(w), Some(vk)) = (&self.window, &mut self.state) {
+            vk.mouse_captured = capture;
+            if capture {
+                let _ = w.set_cursor_grab(CursorGrabMode::Locked)
+                    .or_else(|_| w.set_cursor_grab(CursorGrabMode::Confined));
+                w.set_cursor_visible(false);
+            } else {
+                let _ = w.set_cursor_grab(CursorGrabMode::None);
+                w.set_cursor_visible(true);
+            }
+        }
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -549,6 +612,53 @@ impl ApplicationHandler for App {
                     vk.resize(size.width, size.height);
                 }
             }
+            WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                button: winit::event::MouseButton::Left,
+                ..
+            } => {
+                self.capture_mouse(true);
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    let pressed = event.state == winit::event::ElementState::Pressed;
+                    if let Some(ref mut vk) = self.state {
+                        if pressed {
+                            vk.keys_held.insert(key);
+                        } else {
+                            vk.keys_held.remove(&key);
+                        }
+
+                        // Handle single-press actions
+                        if pressed && !event.repeat {
+                            match key {
+                                KeyCode::Escape => {
+                                    self.capture_mouse(false);
+                                }
+                                KeyCode::Equal | KeyCode::NumpadAdd => {
+                                    // Zoom in (decrease FOV = narrower view)
+                                    vk.fov = (vk.fov - 0.05).max(0.1);
+                                    eprintln!("FOV: {:.2}", vk.fov);
+                                }
+                                KeyCode::Minus | KeyCode::NumpadSubtract => {
+                                    // Zoom out (increase FOV = wider view)
+                                    vk.fov = (vk.fov + 0.05).min(2.0);
+                                    eprintln!("FOV: {:.2}", vk.fov);
+                                }
+                                KeyCode::BracketRight => {
+                                    vk.max_depth = (vk.max_depth + 1).min(8);
+                                    eprintln!("Fractal depth: {}", vk.max_depth);
+                                }
+                                KeyCode::BracketLeft => {
+                                    vk.max_depth = vk.max_depth.saturating_sub(1).max(1);
+                                    eprintln!("Fractal depth: {}", vk.max_depth);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
             WindowEvent::RedrawRequested => {
                 if let Some(ref mut vk) = self.state {
                     vk.render();
@@ -558,6 +668,20 @@ impl ApplicationHandler for App {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: DeviceId, event: DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta } = event {
+            if let Some(ref mut vk) = self.state {
+                if vk.mouse_captured {
+                    let sensitivity = 0.003f32;
+                    vk.yaw += delta.0 as f32 * sensitivity;
+                    vk.pitch -= delta.1 as f32 * sensitivity;
+                    // Clamp pitch to avoid gimbal lock
+                    vk.pitch = vk.pitch.clamp(-1.5, 1.5);
+                }
+            }
         }
     }
 }
