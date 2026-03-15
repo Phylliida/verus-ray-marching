@@ -11,6 +11,8 @@ verus-geometry = { path = "../verus-geometry" }
 verus-rational = { path = "../verus-rational" }
 verus-bigint = { path = "../verus-bigint" }
 verus-quadratic-extension = { path = "../verus-quadratic-extension" }
+verus-cutedsl = { path = "../verus-cutedsl" }
+verus-vulkan = { path = "../verus-vulkan", default-features = false }
 
 [package.metadata.verus]
 verify = true

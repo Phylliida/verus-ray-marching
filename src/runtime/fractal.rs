@@ -86,7 +86,52 @@ pub fn inverse_transform_ray_exec(
 }
 
 // ---------------------------------------------------------------------------
-// ray_hits_fractal_exec
+// ray_hits_children_exec — mirrors spec ray_hits_children
+// ---------------------------------------------------------------------------
+
+fn ray_hits_children_exec(
+    ray: &RuntimeRay3,
+    transforms: &Vec<RuntimeAffineTransform>,
+    base_aabb: &RuntimeBox3,
+    depth: u64,
+    ghost_desc: Ghost<FractalDesc<RationalModel>>,
+    from: usize,
+) -> (out: bool)
+    requires
+        depth > 0,
+        ray.wf_spec(),
+        base_aabb.wf_spec(),
+        base_aabb@ == ghost_desc@.base_aabb,
+        transforms@.len() == ghost_desc@.transforms.len(),
+        forall|i: int| 0 <= i < transforms@.len() ==>
+            (#[trigger] transforms@[i]).wf_spec() &&
+            transforms@[i]@ == ghost_desc@.transforms[i] &&
+            !ghost_desc@.transforms[i].scale.eqv(RationalModel::from_int_spec(0)),
+    ensures
+        out == ray_hits_children::<RationalModel>(
+            ray@, ghost_desc@, depth as nat, from as nat),
+    decreases depth, transforms@.len() - from,
+{
+    proof {
+        assert((depth as nat - 1) as nat == (depth - 1) as nat);
+    }
+    if from >= transforms.len() {
+        false
+    } else {
+        let child_ray = inverse_transform_ray_exec(&transforms[from], ray);
+        let hit = ray_hits_fractal_exec(
+            &child_ray, transforms, base_aabb, depth - 1, ghost_desc,
+        );
+        if hit {
+            true
+        } else {
+            ray_hits_children_exec(ray, transforms, base_aabb, depth, ghost_desc, from + 1)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ray_hits_fractal_exec — mirrors spec ray_hits_fractal
 // ---------------------------------------------------------------------------
 
 /// Does the ray hit any leaf of the fractal at the given depth?
@@ -109,24 +154,12 @@ pub fn ray_hits_fractal_exec(
             !ghost_desc@.transforms[i].scale.eqv(RationalModel::from_int_spec(0)),
     ensures
         out == ray_hits_fractal::<RationalModel>(ray@, ghost_desc@, depth as nat),
-    decreases depth, 1nat,
+    decreases depth, transforms@.len() + 1,
 {
     if depth == 0 {
         crate::runtime::ray_box::ray_hits_box_exec(ray, base_aabb)
     } else {
-        proof {
-            assert((depth as nat - 1) as nat == (depth - 1) as nat);
-            // Test: can Z3 unfold ray_hits_fractal now with decreases depth, 0nat?
-            assert(ray_hits_fractal::<RationalModel>(ray@, ghost_desc@, depth as nat) ==
-                (exists|j: int| 0 <= j < ghost_desc@.transforms.len() &&
-                    #[trigger] ray_hits_fractal::<RationalModel>(
-                        inverse_transform_ray(ghost_desc@.transforms[j], ray@),
-                        ghost_desc@,
-                        (depth as nat - 1) as nat,
-                    )));
-        }
-        assume(false);
-        false
+        ray_hits_children_exec(ray, transforms, base_aabb, depth, ghost_desc, 0)
     }
 }
 
