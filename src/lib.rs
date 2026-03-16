@@ -32,6 +32,15 @@ pub mod menger;
 pub mod sierpinski;
 
 #[cfg(verus_keep_ghost)]
+pub mod torus;
+
+#[cfg(verus_keep_ghost)]
+pub mod pyramid;
+
+#[cfg(verus_keep_ghost)]
+pub mod mandelbulb;
+
+#[cfg(verus_keep_ghost)]
 pub mod dispatch;
 
 #[cfg(verus_keep_ghost)]

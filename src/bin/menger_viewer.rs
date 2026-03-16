@@ -1,7 +1,8 @@
-//! Menger sponge fractal renderer using Vulkan compute.
+//! Multi-shape viewer with exact ray casting using Vulkan compute.
 //!
-//! The GLSL compute shader mirrors the verified `ray_hits_fractal` algorithm
-//! (iterative IFS descent with AABB pruning) from verus-ray-marching.
+//! The GLSL compute shader implements exact ray intersection for 6 shapes:
+//! sphere (quadratic), cube (AABB), torus (quartic/Ferrari), pyramid (5-face),
+//! Menger sponge (IFS descent), Mandelbulb (octree + triplex power).
 //!
 //! Controls:
 //!   WASD      — fly forward/left/back/right
@@ -10,9 +11,12 @@
 //!   LCtrl     — speed boost (5×)
 //!   Mouse     — look around (click to capture, Escape to release)
 //!   +/=  -/_  — zoom in/out (FOV)
-//!   ] / [     — increase/decrease fractal depth (1–8)
+//!   1-6       — select shape (Sphere/Cube/Torus/Pyramid/Menger/Mandelbulb)
+//!   ] / [     — increase/decrease depth (1–8, Menger + Mandelbulb)
+//!   P / O     — increase/decrease Mandelbulb power (2–16)
+//!   I / U     — increase/decrease Mandelbulb iterations (1–32)
 //!
-//! Run: `cargo run --bin menger_viewer --features vulkan-backend`
+//! Run: `cargo run --bin menger_viewer --features viewer`
 
 use std::collections::HashSet;
 use winit::{
@@ -50,12 +54,16 @@ mod vulkan {
     use verus_vulkan::runtime::pipeline::RuntimeComputePipeline;
     use verus_vulkan::runtime::descriptor::{RuntimeDescriptorSetLayout, RuntimeDescriptorPool, RuntimeDescriptorSet};
 
+    pub const SHAPE_NAMES: [&str; 6] = ["Sphere", "Cube", "Torus", "Pyramid", "Menger", "Mandelbulb"];
+
     #[repr(C)]
     struct PushConstants {
         eye: [f32; 3],      fov: f32,
         forward: [f32; 3],  width: u32,
         right: [f32; 3],    height: u32,
         up: [f32; 3],       max_depth: u32,
+        shape_id: u32,      power: u32,
+        iterations: u32,    _pad: u32,
     }
 
     pub struct VkState {
@@ -90,6 +98,9 @@ mod vulkan {
         pub fov: f32,
         pub move_speed: f32,
         pub max_depth: u32,
+        pub shape_id: u32,
+        pub power: u32,
+        pub iterations: u32,
         // Input
         pub keys_held: HashSet<KeyCode>,
         pub last_frame_time: Instant,
@@ -194,7 +205,7 @@ mod vulkan {
             );
 
             // 10. Shader module
-            let spv_code = spv_to_u32(include_bytes!("shaders/menger.comp.spv"));
+            let spv_code = spv_to_u32(include_bytes!("shaders/viewer.comp.spv"));
             let shader_module = ffi::vk_create_shader_module(&ctx, Ghost::assume_new(), &spv_code);
 
             // 11. Compute pipeline
@@ -263,11 +274,13 @@ mod vulkan {
             let pitch = dy.atan2((dx * dx + dz * dz).sqrt());
 
             eprintln!(
-                "Menger viewer initialized: {}x{}, format {:?}",
+                "Shape viewer initialized: {}x{}, format {:?}",
                 width, height, format
             );
             eprintln!("Controls: WASD=move, Mouse=look (click to capture, Esc=release)");
-            eprintln!("          Space/LShift=up/down, LCtrl=boost, +/-=FOV, ]/[=depth");
+            eprintln!("          Space/LShift=up/down, LCtrl=boost, +/-=FOV");
+            eprintln!("          1-6=shape, ]/[=depth, P/O=power, I/U=iterations");
+            eprintln!("Shape: {} (Menger)", SHAPE_NAMES[4]);
 
             VkState {
                 ctx,
@@ -298,6 +311,9 @@ mod vulkan {
                 fov: 0.8,
                 move_speed: 1.5,
                 max_depth: 4,
+                shape_id: 4, // Default: Menger
+                power: 8,
+                iterations: 8,
                 keys_held: HashSet::new(),
                 last_frame_time: Instant::now(),
                 mouse_captured: false,
@@ -409,6 +425,10 @@ mod vulkan {
                 height: self.height,
                 up,
                 max_depth: self.max_depth,
+                shape_id: self.shape_id,
+                power: self.power,
+                iterations: self.iterations,
+                _pad: 0,
             };
             let pc_bytes: &[u8] = unsafe {
                 std::slice::from_raw_parts(
@@ -591,7 +611,7 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = WindowAttributes::default().with_title("Verified Menger Sponge");
+        let attrs = WindowAttributes::default().with_title("Verified Shape Viewer");
         let window = std::sync::Arc::new(
             event_loop
                 .create_window(attrs)
@@ -647,11 +667,36 @@ impl ApplicationHandler for App {
                                 }
                                 KeyCode::BracketRight => {
                                     vk.max_depth = (vk.max_depth + 1).min(8);
-                                    eprintln!("Fractal depth: {}", vk.max_depth);
+                                    eprintln!("Depth: {}", vk.max_depth);
                                 }
                                 KeyCode::BracketLeft => {
                                     vk.max_depth = vk.max_depth.saturating_sub(1).max(1);
-                                    eprintln!("Fractal depth: {}", vk.max_depth);
+                                    eprintln!("Depth: {}", vk.max_depth);
+                                }
+                                // Shape selection: 1-6
+                                KeyCode::Digit1 => { vk.shape_id = 0; eprintln!("Shape: {}", vulkan::SHAPE_NAMES[0]); }
+                                KeyCode::Digit2 => { vk.shape_id = 1; eprintln!("Shape: {}", vulkan::SHAPE_NAMES[1]); }
+                                KeyCode::Digit3 => { vk.shape_id = 2; eprintln!("Shape: {}", vulkan::SHAPE_NAMES[2]); }
+                                KeyCode::Digit4 => { vk.shape_id = 3; eprintln!("Shape: {}", vulkan::SHAPE_NAMES[3]); }
+                                KeyCode::Digit5 => { vk.shape_id = 4; eprintln!("Shape: {}", vulkan::SHAPE_NAMES[4]); }
+                                KeyCode::Digit6 => { vk.shape_id = 5; eprintln!("Shape: {}", vulkan::SHAPE_NAMES[5]); }
+                                // Mandelbulb power: P/O
+                                KeyCode::KeyP => {
+                                    vk.power = (vk.power + 1).min(16);
+                                    eprintln!("Power: {}", vk.power);
+                                }
+                                KeyCode::KeyO => {
+                                    vk.power = vk.power.saturating_sub(1).max(2);
+                                    eprintln!("Power: {}", vk.power);
+                                }
+                                // Mandelbulb iterations: I/U
+                                KeyCode::KeyI => {
+                                    vk.iterations = (vk.iterations + 1).min(32);
+                                    eprintln!("Iterations: {}", vk.iterations);
+                                }
+                                KeyCode::KeyU => {
+                                    vk.iterations = vk.iterations.saturating_sub(1).max(1);
+                                    eprintln!("Iterations: {}", vk.iterations);
                                 }
                                 _ => {}
                             }
