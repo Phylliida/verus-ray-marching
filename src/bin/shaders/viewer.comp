@@ -1,0 +1,619 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba8) uniform writeonly image2D outImage;
+
+layout(push_constant) uniform PushConstants {
+    vec3 eye;       float fov;
+    vec3 forward;   uint width;
+    vec3 right;     uint height;
+    vec3 up;        uint max_depth;
+    uint shape_id;  uint power;
+    uint iterations; uint _pad;
+};
+
+// Menger IFS table: 20 kept subcubes (matching menger_ijk from menger.rs)
+const ivec3 MENGER_IJK[20] = ivec3[20](
+    ivec3(0,0,0), ivec3(0,0,1), ivec3(0,0,2), ivec3(0,1,0), ivec3(0,1,2),
+    ivec3(0,2,0), ivec3(0,2,1), ivec3(0,2,2), ivec3(1,0,0), ivec3(1,0,2),
+    ivec3(1,2,0), ivec3(1,2,2), ivec3(2,0,0), ivec3(2,0,1), ivec3(2,0,2),
+    ivec3(2,1,0), ivec3(2,1,2), ivec3(2,2,0), ivec3(2,2,1), ivec3(2,2,2)
+);
+
+#define MAX_STACK 9
+#define INF 1e30
+#define EPSILON 0.0001
+#define PI 3.14159265358979
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Utility: Ray-AABB intersection (slab method)
+// ═══════════════════════════════════════════════════════════════════════════
+bool ray_hits_aabb(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax,
+                   out float t_near, out float t_far) {
+    vec3 inv_rd = 1.0 / rd;
+    vec3 t0 = (bmin - ro) * inv_rd;
+    vec3 t1 = (bmax - ro) * inv_rd;
+    vec3 tmin = min(t0, t1);
+    vec3 tmax = max(t0, t1);
+    t_near = max(max(tmin.x, tmin.y), tmin.z);
+    t_far  = min(min(tmax.x, tmax.y), tmax.z);
+    return t_near <= t_far && t_far > EPSILON;
+}
+
+vec3 aabb_hit_normal(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax) {
+    vec3 inv_rd = 1.0 / rd;
+    vec3 t0 = (bmin - ro) * inv_rd;
+    vec3 t1 = (bmax - ro) * inv_rd;
+    vec3 tmin_v = min(t0, t1);
+    float t_near = max(max(tmin_v.x, tmin_v.y), tmin_v.z);
+    if (t_near == tmin_v.x) return vec3(-sign(rd.x), 0, 0);
+    if (t_near == tmin_v.y) return vec3(0, -sign(rd.y), 0);
+    return vec3(0, 0, -sign(rd.z));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shape 0: Sphere — quadratic ray intersection
+// Center (0.5, 0.5, 0.5), radius 0.45
+// ═══════════════════════════════════════════════════════════════════════════
+float ray_hits_sphere(vec3 ro, vec3 rd, out vec3 hit_normal) {
+    vec3 center = vec3(0.5);
+    float radius = 0.45;
+    vec3 oc = ro - center;
+    float a = dot(rd, rd);
+    float b = 2.0 * dot(oc, rd);
+    float c = dot(oc, oc) - radius * radius;
+    float disc = b * b - 4.0 * a * c;
+    if (disc < 0.0) return INF;
+    float sq = sqrt(disc);
+    float t0 = (-b - sq) / (2.0 * a);
+    float t1 = (-b + sq) / (2.0 * a);
+    float t = (t0 > EPSILON) ? t0 : t1;
+    if (t < EPSILON) return INF;
+    hit_normal = normalize(ro + t * rd - center);
+    return t;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shape 1: Cube — AABB [0,1]^3
+// ═══════════════════════════════════════════════════════════════════════════
+float ray_hits_cube(vec3 ro, vec3 rd, out vec3 hit_normal) {
+    float t_near, t_far;
+    if (!ray_hits_aabb(ro, rd, vec3(0), vec3(1), t_near, t_far)) {
+        return INF;
+    }
+    float t = max(t_near, EPSILON);
+    if (t > t_far) return INF;
+    hit_normal = aabb_hit_normal(ro, rd, vec3(0), vec3(1));
+    return t;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shape 2: Torus — quartic ray intersection via Ferrari's method
+// Center (0.5, 0.5, 0.5), major radius R=0.35, minor radius r=0.15, Y-axis
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Solve cubic x^3 + px + q = 0, return one real root (depressed cubic)
+float solve_depressed_cubic(float p, float q) {
+    float disc = q * q / 4.0 + p * p * p / 27.0;
+    if (disc >= 0.0) {
+        float sq = sqrt(disc);
+        float u = -q / 2.0 + sq;
+        float v = -q / 2.0 - sq;
+        return sign(u) * pow(abs(u), 1.0 / 3.0) + sign(v) * pow(abs(v), 1.0 / 3.0);
+    } else {
+        // Three real roots — use trigonometric form
+        float m = sqrt(-p / 3.0);
+        float theta = acos(clamp(3.0 * q / (2.0 * p * m), -1.0, 1.0)) / 3.0;
+        return 2.0 * m * cos(theta);
+    }
+}
+
+// Solve x^3 + ax^2 + bx + c = 0, return one real root
+float solve_cubic_one_root(float a, float b, float c) {
+    float p = b - a * a / 3.0;
+    float q = 2.0 * a * a * a / 27.0 - a * b / 3.0 + c;
+    return solve_depressed_cubic(p, q) - a / 3.0;
+}
+
+float ray_hits_torus(vec3 ro, vec3 rd, out vec3 hit_normal) {
+    vec3 center = vec3(0.5);
+    float R = 0.35;  // major radius
+    float r = 0.15;  // minor radius
+
+    // Shift ray to torus center
+    vec3 o = ro - center;
+    vec3 d = rd;
+
+    // Precompute dot products
+    float dd = dot(d, d);
+    float od = dot(o, d);
+    float oo = dot(o, o);
+    float R2 = R * R;
+    float r2 = r * r;
+    float alpha = oo + R2 - r2;
+
+    // Quartic: F(t) = (|o+td|^2 + R^2 - r^2)^2 - 4R^2(x(t)^2+z(t)^2) = 0
+    float c4 = dd * dd;
+    float c3 = 4.0 * dd * od;
+    float c2 = 4.0 * od * od + 2.0 * dd * alpha - 4.0 * R2 * (dd - d.y * d.y);
+    float c1 = 4.0 * od * alpha - 8.0 * R2 * (od - o.y * d.y);
+    float c0 = alpha * alpha - 4.0 * R2 * (oo - o.y * o.y);
+
+    // Normalize to monic: t^4 + At^3 + Bt^2 + Ct + D = 0
+    float A = c3 / c4;
+    float B = c2 / c4;
+    float C = c1 / c4;
+    float D = c0 / c4;
+
+    // Depress: u = t - A/4 → u^4 + pu^2 + qu + s = 0
+    float A2 = A * A;
+    float p = B - 3.0 * A2 / 8.0;
+    float q = A * A2 / 8.0 - A * B / 2.0 + C;
+    float s = -3.0 * A2 * A2 / 256.0 + A2 * B / 16.0 - A * C / 4.0 + D;
+
+    // Ferrari: solve resolvent cubic y^3 - p/2 * y^2 - s*y + (ps/2 - q^2/8) = 0
+    float y = solve_cubic_one_root(-p / 2.0, -s, p * s / 2.0 - q * q / 8.0);
+
+    // Factor into two quadratics: u^2 ± mu + (y ± q/(2m))
+    float m2 = 2.0 * y - p;
+    if (m2 < 0.0) return INF;
+    float m = sqrt(m2);
+    if (m < 1e-8) return INF;
+    float qm = q / (2.0 * m);
+
+    float best_t = INF;
+
+    // Quadratic 1: u^2 + mu + (y + qm) = 0
+    float disc1 = m * m / 4.0 - (y + qm);
+    if (disc1 >= 0.0) {
+        float sq1 = sqrt(disc1);
+        float u1 = -m / 2.0 - sq1;
+        float u2 = -m / 2.0 + sq1;
+        float t1 = u1 - A / 4.0;
+        float t2 = u2 - A / 4.0;
+        if (t1 > EPSILON && t1 < best_t) best_t = t1;
+        if (t2 > EPSILON && t2 < best_t) best_t = t2;
+    }
+
+    // Quadratic 2: u^2 - mu + (y - qm) = 0
+    float disc2 = m * m / 4.0 - (y - qm);
+    if (disc2 >= 0.0) {
+        float sq2 = sqrt(disc2);
+        float u3 = m / 2.0 - sq2;
+        float u4 = m / 2.0 + sq2;
+        float t3 = u3 - A / 4.0;
+        float t4 = u4 - A / 4.0;
+        if (t3 > EPSILON && t3 < best_t) best_t = t3;
+        if (t4 > EPSILON && t4 < best_t) best_t = t4;
+    }
+
+    if (best_t >= INF) return INF;
+
+    // Normal: gradient of F = (|p|^2+R^2-r^2)^2 - 4R^2(x^2+z^2)
+    // dF/dx = 4x(S-2R^2), dF/dy = 4yS, dF/dz = 4z(S-2R^2) where S=|p|^2+R^2-r^2
+    vec3 hp = o + best_t * d;
+    float S = dot(hp, hp) + R2 - r2;
+    hit_normal = normalize(vec3(
+        hp.x * (S - 2.0 * R2),
+        hp.y * S,
+        hp.z * (S - 2.0 * R2)
+    ));
+
+    return best_t;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shape 3: Pyramid — 5-face intersection
+// Base [0,1]×{0}×[0,1], apex at (0.5, 1.0, 0.5)
+// ═══════════════════════════════════════════════════════════════════════════
+float ray_hits_pyramid(vec3 ro, vec3 rd, out vec3 hit_normal) {
+    float best_t = INF;
+    vec3 best_n = vec3(0);
+
+    // Base face: y=0, x in [0,1], z in [0,1]
+    if (abs(rd.y) > EPSILON) {
+        float t = -ro.y / rd.y;
+        if (t > EPSILON) {
+            vec3 p = ro + t * rd;
+            if (p.x >= 0.0 && p.x <= 1.0 && p.z >= 0.0 && p.z <= 1.0) {
+                if (t < best_t) {
+                    best_t = t;
+                    best_n = vec3(0, -1, 0);
+                }
+            }
+        }
+    }
+
+    // 4 triangular side faces
+    // Apex
+    vec3 apex = vec3(0.5, 1.0, 0.5);
+    // Base corners
+    vec3 b0 = vec3(0, 0, 0);
+    vec3 b1 = vec3(1, 0, 0);
+    vec3 b2 = vec3(1, 0, 1);
+    vec3 b3 = vec3(0, 0, 1);
+
+    // Face: apex, b0, b1 (front, z=0 side)
+    {
+        vec3 e1 = b0 - apex;
+        vec3 e2 = b1 - apex;
+        vec3 n = cross(e1, e2);
+        float nd = dot(n, rd);
+        if (abs(nd) > EPSILON) {
+            float t = dot(n, apex - ro) / nd;
+            if (t > EPSILON && t < best_t) {
+                vec3 p = ro + t * rd;
+                // Barycentric test
+                vec3 v0 = b1 - apex, v1 = b0 - apex, v2 = p - apex;
+                float d00 = dot(v0, v0);
+                float d01 = dot(v0, v1);
+                float d02 = dot(v0, v2);
+                float d11 = dot(v1, v1);
+                float d12 = dot(v1, v2);
+                float inv = 1.0 / (d00 * d11 - d01 * d01);
+                float u = (d11 * d02 - d01 * d12) * inv;
+                float v = (d00 * d12 - d01 * d02) * inv;
+                if (u >= 0.0 && v >= 0.0 && u + v <= 1.0) {
+                    best_t = t;
+                    best_n = normalize(n);
+                }
+            }
+        }
+    }
+
+    // Face: apex, b1, b2 (right, x=1 side)
+    {
+        vec3 e1 = b1 - apex;
+        vec3 e2 = b2 - apex;
+        vec3 n = cross(e1, e2);
+        float nd = dot(n, rd);
+        if (abs(nd) > EPSILON) {
+            float t = dot(n, apex - ro) / nd;
+            if (t > EPSILON && t < best_t) {
+                vec3 p = ro + t * rd;
+                vec3 v0 = b2 - apex, v1 = b1 - apex, v2 = p - apex;
+                float d00 = dot(v0, v0);
+                float d01 = dot(v0, v1);
+                float d02 = dot(v0, v2);
+                float d11 = dot(v1, v1);
+                float d12 = dot(v1, v2);
+                float inv = 1.0 / (d00 * d11 - d01 * d01);
+                float u = (d11 * d02 - d01 * d12) * inv;
+                float v = (d00 * d12 - d01 * d02) * inv;
+                if (u >= 0.0 && v >= 0.0 && u + v <= 1.0) {
+                    best_t = t;
+                    best_n = normalize(n);
+                }
+            }
+        }
+    }
+
+    // Face: apex, b2, b3 (back, z=1 side)
+    {
+        vec3 e1 = b2 - apex;
+        vec3 e2 = b3 - apex;
+        vec3 n = cross(e1, e2);
+        float nd = dot(n, rd);
+        if (abs(nd) > EPSILON) {
+            float t = dot(n, apex - ro) / nd;
+            if (t > EPSILON && t < best_t) {
+                vec3 p = ro + t * rd;
+                vec3 v0 = b3 - apex, v1 = b2 - apex, v2 = p - apex;
+                float d00 = dot(v0, v0);
+                float d01 = dot(v0, v1);
+                float d02 = dot(v0, v2);
+                float d11 = dot(v1, v1);
+                float d12 = dot(v1, v2);
+                float inv = 1.0 / (d00 * d11 - d01 * d01);
+                float u = (d11 * d02 - d01 * d12) * inv;
+                float v = (d00 * d12 - d01 * d02) * inv;
+                if (u >= 0.0 && v >= 0.0 && u + v <= 1.0) {
+                    best_t = t;
+                    best_n = normalize(n);
+                }
+            }
+        }
+    }
+
+    // Face: apex, b3, b0 (left, x=0 side)
+    {
+        vec3 e1 = b3 - apex;
+        vec3 e2 = b0 - apex;
+        vec3 n = cross(e1, e2);
+        float nd = dot(n, rd);
+        if (abs(nd) > EPSILON) {
+            float t = dot(n, apex - ro) / nd;
+            if (t > EPSILON && t < best_t) {
+                vec3 p = ro + t * rd;
+                vec3 v0 = b0 - apex, v1 = b3 - apex, v2 = p - apex;
+                float d00 = dot(v0, v0);
+                float d01 = dot(v0, v1);
+                float d02 = dot(v0, v2);
+                float d11 = dot(v1, v1);
+                float d12 = dot(v1, v2);
+                float inv = 1.0 / (d00 * d11 - d01 * d01);
+                float u = (d11 * d02 - d01 * d12) * inv;
+                float v = (d00 * d12 - d01 * d02) * inv;
+                if (u >= 0.0 && v >= 0.0 && u + v <= 1.0) {
+                    best_t = t;
+                    best_n = normalize(n);
+                }
+            }
+        }
+    }
+
+    hit_normal = best_n;
+    return best_t;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shape 4: Menger Sponge — iterative IFS descent (same as before)
+// ═══════════════════════════════════════════════════════════════════════════
+float ray_hits_menger(vec3 ro, vec3 rd, out vec3 hit_normal) {
+    float t_outer_near, t_outer_far;
+    if (!ray_hits_aabb(ro, rd, vec3(0), vec3(1), t_outer_near, t_outer_far)) {
+        return INF;
+    }
+
+    int depth = int(max_depth);
+
+    vec3  stk_offset[MAX_STACK];
+    float stk_scale [MAX_STACK];
+    int   stk_child [MAX_STACK];
+    int   stk_depth [MAX_STACK];
+
+    int sp = 0;
+    stk_offset[0] = vec3(0);
+    stk_scale [0] = 1.0;
+    stk_child [0] = 0;
+    stk_depth [0] = depth;
+
+    float closest_t = INF;
+    vec3 closest_normal = vec3(0);
+
+    while (sp >= 0) {
+        if (stk_depth[sp] == 0) {
+            vec3 bmin = stk_offset[sp];
+            vec3 bmax = bmin + stk_scale[sp];
+            float t_near, t_far;
+            if (ray_hits_aabb(ro, rd, bmin, bmax, t_near, t_far)) {
+                float t = max(t_near, EPSILON);
+                if (t < closest_t) {
+                    closest_t = t;
+                    closest_normal = aabb_hit_normal(ro, rd, bmin, bmax);
+                }
+            }
+            sp--;
+            continue;
+        }
+
+        if (stk_child[sp] >= 20) {
+            sp--;
+            continue;
+        }
+
+        int ci = stk_child[sp];
+        stk_child[sp]++;
+
+        ivec3 ijk = MENGER_IJK[ci];
+        float child_scale = stk_scale[sp] / 3.0;
+        vec3 child_offset = stk_offset[sp] + vec3(ijk) * child_scale;
+
+        float t_near, t_far;
+        if (ray_hits_aabb(ro, rd, child_offset, child_offset + child_scale,
+                          t_near, t_far)) {
+            if (t_near < closest_t) {
+                sp++;
+                stk_offset[sp] = child_offset;
+                stk_scale [sp] = child_scale;
+                stk_child [sp] = 0;
+                stk_depth [sp] = stk_depth[sp - 1] - 1;
+            }
+        }
+    }
+
+    hit_normal = closest_normal;
+    return closest_t;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shape 5: Mandelbulb — octree descent with triplex power iteration
+// Bounding box [-1.5, 1.5]^3 centered at origin, shifted to [0,1]^3 domain
+// ═══════════════════════════════════════════════════════════════════════════
+vec3 triplex_power(vec3 z, int n) {
+    float r = length(z);
+    if (r < 1e-10) return vec3(0);
+    float theta = acos(clamp(z.y / r, -1.0, 1.0));
+    float phi = atan(z.z, z.x);
+    float rn = pow(r, float(n));
+    float nt = float(n) * theta;
+    float np = float(n) * phi;
+    return rn * vec3(cos(np) * sin(nt), cos(nt), sin(np) * sin(nt));
+}
+
+bool mandelbulb_test(vec3 c, int pw, int iters) {
+    vec3 z = vec3(0);
+    for (int i = 0; i < iters; i++) {
+        z = triplex_power(z, pw) + c;
+        if (dot(z, z) > 4.0) return false;
+    }
+    return true;
+}
+
+float ray_hits_mandelbulb(vec3 ro, vec3 rd, out vec3 hit_normal) {
+    // Map from scene coords: mandelbulb lives in [-1.5, 1.5]^3
+    // We center it at (0.5, 0.5, 0.5) with scale to fit in roughly [0,1]^3
+    vec3 center = vec3(0.5);
+    float scale = 1.8;  // half-extent in world space maps to 1.5 in bulb space
+
+    // Transform ray to mandelbulb space: [-1.5, 1.5]^3
+    vec3 mro = (ro - center) * (1.5 / scale);
+    vec3 mrd = rd * (1.5 / scale);
+
+    // Bounding box test in mandelbulb space
+    vec3 bmin = vec3(-1.5);
+    vec3 bmax = vec3(1.5);
+    float t_outer_near, t_outer_far;
+    if (!ray_hits_aabb(mro, mrd, bmin, bmax, t_outer_near, t_outer_far)) {
+        return INF;
+    }
+
+    int depth = int(max_depth);
+    int pw = int(power);
+    int iters = int(iterations);
+
+    vec3  stk_offset[MAX_STACK];
+    float stk_scale [MAX_STACK];
+    int   stk_child [MAX_STACK];
+    int   stk_depth [MAX_STACK];
+
+    int sp = 0;
+    stk_offset[0] = bmin;
+    stk_scale [0] = 3.0;  // full extent = 3.0
+    stk_child [0] = 0;
+    stk_depth [0] = depth;
+
+    float closest_t = INF;
+    vec3 closest_normal = vec3(0);
+
+    while (sp >= 0) {
+        if (stk_depth[sp] == 0) {
+            vec3 cell_min = stk_offset[sp];
+            vec3 cell_max = cell_min + stk_scale[sp];
+            vec3 cell_center = (cell_min + cell_max) * 0.5;
+
+            if (mandelbulb_test(cell_center, pw, iters)) {
+                float t_near, t_far;
+                if (ray_hits_aabb(mro, mrd, cell_min, cell_max, t_near, t_far)) {
+                    float t = max(t_near, EPSILON);
+                    if (t < closest_t) {
+                        closest_t = t;
+                        closest_normal = aabb_hit_normal(mro, mrd, cell_min, cell_max);
+                    }
+                }
+            }
+            sp--;
+            continue;
+        }
+
+        if (stk_child[sp] >= 8) {
+            sp--;
+            continue;
+        }
+
+        int ci = stk_child[sp];
+        stk_child[sp]++;
+
+        float child_scale = stk_scale[sp] * 0.5;
+        vec3 child_offset = stk_offset[sp] + vec3(
+            float(ci & 1),
+            float((ci >> 1) & 1),
+            float((ci >> 2) & 1)
+        ) * child_scale;
+
+        // Quick membership test at child center for pruning
+        vec3 child_center = child_offset + child_scale * 0.5;
+        float child_radius = child_scale * 0.866; // sqrt(3)/2 * scale
+
+        // Prune: if center escapes quickly and cell is small, skip
+        // But we need conservative pruning — only skip if ALL corners would escape
+        // Simple heuristic: test center; if it escapes in 2 iterations, skip
+        bool maybe_member = true;
+        {
+            vec3 z = vec3(0);
+            for (int i = 0; i < min(3, iters); i++) {
+                z = triplex_power(z, pw) + child_center;
+                if (dot(z, z) > 4.0 + child_radius * child_radius * 4.0) {
+                    maybe_member = false;
+                    break;
+                }
+            }
+        }
+
+        if (maybe_member) {
+            float t_near, t_far;
+            if (ray_hits_aabb(mro, mrd, child_offset, child_offset + child_scale,
+                              t_near, t_far)) {
+                if (t_near < closest_t) {
+                    sp++;
+                    stk_offset[sp] = child_offset;
+                    stk_scale [sp] = child_scale;
+                    stk_child [sp] = 0;
+                    stk_depth [sp] = stk_depth[sp - 1] - 1;
+                }
+            }
+        }
+    }
+
+    if (closest_t >= INF) return INF;
+
+    // Transform t back to world space
+    hit_normal = closest_normal;
+    return closest_t / (1.5 / scale);  // Undo the ray scaling
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Camera
+// ═══════════════════════════════════════════════════════════════════════════
+void generate_ray(uint px, uint py, out vec3 ro, out vec3 rd) {
+    float aspect = float(width) / float(height);
+    float u = (2.0 * (float(px) + 0.5) / float(width)  - 1.0) * aspect;
+    float v =  1.0 - 2.0 * (float(py) + 0.5) / float(height);
+
+    ro = eye;
+    rd = normalize(forward + fov * u * right + fov * v * up);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Main — dispatch by shape_id
+// ═══════════════════════════════════════════════════════════════════════════
+void main() {
+    uint px = gl_GlobalInvocationID.x;
+    uint py = gl_GlobalInvocationID.y;
+    if (px >= width || py >= height) return;
+
+    vec3 ro, rd;
+    generate_ray(px, py, ro, rd);
+
+    vec3 normal;
+    float t;
+    switch (shape_id) {
+        case 0u: t = ray_hits_sphere(ro, rd, normal); break;
+        case 1u: t = ray_hits_cube(ro, rd, normal); break;
+        case 2u: t = ray_hits_torus(ro, rd, normal); break;
+        case 3u: t = ray_hits_pyramid(ro, rd, normal); break;
+        case 4u: t = ray_hits_menger(ro, rd, normal); break;
+        case 5u: t = ray_hits_mandelbulb(ro, rd, normal); break;
+        default: t = INF; normal = vec3(0); break;
+    }
+
+    vec4 color;
+    if (t < INF) {
+        vec3 hit_pos = ro + t * rd;
+
+        // Directional light + ambient
+        vec3 light_dir = normalize(vec3(0.5, 1.0, 0.3));
+        float diffuse = max(dot(normal, light_dir), 0.0);
+        float ambient = 0.15;
+
+        // Per-shape base color
+        vec3 base_color;
+        switch (shape_id) {
+            case 0u: base_color = vec3(0.3, 0.5, 0.9); break;   // Sphere: blue
+            case 1u: base_color = vec3(0.9, 0.3, 0.3); break;   // Cube: red
+            case 2u: base_color = vec3(0.3, 0.9, 0.5); break;   // Torus: green
+            case 3u: base_color = vec3(0.9, 0.8, 0.2); break;   // Pyramid: gold
+            case 4u: base_color = vec3(0.8, 0.6, 0.3) + 0.15 * hit_pos; break; // Menger: warm
+            case 5u: base_color = vec3(0.7, 0.3, 0.8) + 0.1 * hit_pos; break;  // Mandelbulb: purple
+            default: base_color = vec3(0.5); break;
+        }
+
+        color = vec4(base_color * (ambient + 0.85 * diffuse), 1.0);
+    } else {
+        // Gradient background
+        float gradient = float(py) / float(height);
+        color = vec4(mix(vec3(0.1, 0.1, 0.2), vec3(0.02, 0.02, 0.05), gradient), 1.0);
+    }
+
+    imageStore(outImage, ivec2(px, py), color);
+}
