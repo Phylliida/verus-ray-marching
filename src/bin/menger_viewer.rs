@@ -394,6 +394,12 @@ mod vulkan {
 
             let (forward, right, up) = self.camera_vectors();
 
+            // Wait for ALL GPU work including presentation to complete.
+            // This prevents a binary semaphore double-signal race:
+            // with fast shaders (sphere/cube), the GPU finishes before
+            // the previous present has consumed render_finished_sem.
+            unsafe { let _ = self.ctx.device.device_wait_idle(); }
+
             // Wait for previous frame
             ffi::vk_wait_for_fences(
                 &self.ctx,

@@ -417,139 +417,98 @@ float ray_hits_menger(vec3 ro, vec3 rd, out vec3 hit_normal) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Shape 5: Mandelbulb — octree descent with triplex power iteration
-// Bounding box [-1.5, 1.5]^3 centered at origin, shifted to [0,1]^3 domain
+// Shape 5: Mandelbulb — SDF ray marching with distance estimator
+// DE(c) = 0.5 * |z| * log(|z|) / dr  (Hubbard-Douady potential)
 // ═══════════════════════════════════════════════════════════════════════════
-vec3 triplex_power(vec3 z, int n) {
+
+// Distance estimator: returns conservative lower bound on distance to surface.
+// Tracks running derivative dr alongside the iteration z_{k+1} = z_k^n + c.
+float mandelbulb_DE(vec3 pos, int pw, int iters) {
+    vec3 z = pos;
+    float dr = 1.0;
     float r = length(z);
-    if (r < 1e-10) return vec3(0);
-    float theta = acos(clamp(z.y / r, -1.0, 1.0));
-    float phi = atan(z.z, z.x);
-    float rn = pow(r, float(n));
-    float nt = float(n) * theta;
-    float np = float(n) * phi;
-    return rn * vec3(cos(np) * sin(nt), cos(nt), sin(np) * sin(nt));
+    float fpw = float(pw);
+
+    for (int i = 0; i < 64; i++) {
+        if (i >= iters) break;
+        if (r > 2.0) break;
+
+        // Convert to spherical
+        float theta = acos(clamp(z.y / r, -1.0, 1.0));
+        float phi = atan(z.z, z.x);
+
+        // Running derivative: dr = r^(n-1) * n * dr + 1
+        float rn1 = pow(r, fpw - 1.0);
+        dr = rn1 * fpw * dr + 1.0;
+
+        // z = z^n + c (triplex power in spherical coords)
+        float zr = rn1 * r;  // r^n
+        float nt = fpw * theta;
+        float np = fpw * phi;
+        z = zr * vec3(cos(np) * sin(nt), cos(nt), sin(np) * sin(nt)) + pos;
+
+        r = length(z);
+    }
+
+    return 0.5 * log(max(r, 1e-10)) * r / max(dr, 1e-10);
 }
 
-bool mandelbulb_test(vec3 c, int pw, int iters) {
-    vec3 z = vec3(0);
-    for (int i = 0; i < iters; i++) {
-        z = triplex_power(z, pw) + c;
-        if (dot(z, z) > 4.0) return false;
-    }
-    return true;
+// Normal via tetrahedron gradient (4 DE samples)
+vec3 mandelbulb_normal(vec3 p, int pw, int iters) {
+    const float eps = 0.0005;
+    const vec3 k1 = vec3( 1, -1, -1);
+    const vec3 k2 = vec3(-1, -1,  1);
+    const vec3 k3 = vec3(-1,  1, -1);
+    const vec3 k4 = vec3( 1,  1,  1);
+    return normalize(
+        k1 * mandelbulb_DE(p + k1 * eps, pw, iters) +
+        k2 * mandelbulb_DE(p + k2 * eps, pw, iters) +
+        k3 * mandelbulb_DE(p + k3 * eps, pw, iters) +
+        k4 * mandelbulb_DE(p + k4 * eps, pw, iters)
+    );
 }
 
 float ray_hits_mandelbulb(vec3 ro, vec3 rd, out vec3 hit_normal) {
-    // Map from scene coords: mandelbulb lives in [-1.5, 1.5]^3
-    // We center it at (0.5, 0.5, 0.5) with scale to fit in roughly [0,1]^3
+    // Center at (0.5, 0.5, 0.5), scale so bulb fits in ~[0,1]^3
     vec3 center = vec3(0.5);
-    float scale = 1.8;  // half-extent in world space maps to 1.5 in bulb space
+    float world_to_bulb = 1.5 / 0.6;  // maps 0.6 world units to 1.5 bulb units
 
-    // Transform ray to mandelbulb space: [-1.5, 1.5]^3
-    vec3 mro = (ro - center) * (1.5 / scale);
-    vec3 mrd = rd * (1.5 / scale);
+    vec3 mro = (ro - center) * world_to_bulb;
+    vec3 mrd = normalize(rd * world_to_bulb);
 
-    // Bounding box test in mandelbulb space
-    vec3 bmin = vec3(-1.5);
-    vec3 bmax = vec3(1.5);
-    float t_outer_near, t_outer_far;
-    if (!ray_hits_aabb(mro, mrd, bmin, bmax, t_outer_near, t_outer_far)) {
-        return INF;
-    }
+    // Bounding sphere test (radius 1.5 in bulb space)
+    vec3 oc = mro;
+    float b = dot(oc, mrd);
+    float c = dot(oc, oc) - 1.5 * 1.5;
+    float disc = b * b - c;
+    if (disc < 0.0) return INF;
+    float sq = sqrt(disc);
+    float t_start = max(-b - sq, 0.0);
+    float t_end = -b + sq;
+    if (t_end < 0.0) return INF;
 
-    int depth = int(max_depth);
     int pw = int(power);
     int iters = int(iterations);
+    int max_steps = int(max_depth) * 64;  // depth controls quality
 
-    vec3  stk_offset[MAX_STACK];
-    float stk_scale [MAX_STACK];
-    int   stk_child [MAX_STACK];
-    int   stk_depth [MAX_STACK];
+    float t = t_start;
+    float hit_eps = 0.0002;
 
-    int sp = 0;
-    stk_offset[0] = bmin;
-    stk_scale [0] = 3.0;  // full extent = 3.0
-    stk_child [0] = 0;
-    stk_depth [0] = depth;
+    for (int i = 0; i < 512; i++) {
+        if (i >= max_steps) break;
+        vec3 p = mro + t * mrd;
+        float d = mandelbulb_DE(p, pw, iters);
 
-    float closest_t = INF;
-    vec3 closest_normal = vec3(0);
-
-    while (sp >= 0) {
-        if (stk_depth[sp] == 0) {
-            vec3 cell_min = stk_offset[sp];
-            vec3 cell_max = cell_min + stk_scale[sp];
-            vec3 cell_center = (cell_min + cell_max) * 0.5;
-
-            if (mandelbulb_test(cell_center, pw, iters)) {
-                float t_near, t_far;
-                if (ray_hits_aabb(mro, mrd, cell_min, cell_max, t_near, t_far)) {
-                    float t = max(t_near, EPSILON);
-                    if (t < closest_t) {
-                        closest_t = t;
-                        closest_normal = aabb_hit_normal(mro, mrd, cell_min, cell_max);
-                    }
-                }
-            }
-            sp--;
-            continue;
+        if (d < hit_eps) {
+            hit_normal = mandelbulb_normal(p, pw, iters);
+            return t / world_to_bulb;
         }
 
-        if (stk_child[sp] >= 8) {
-            sp--;
-            continue;
-        }
-
-        int ci = stk_child[sp];
-        stk_child[sp]++;
-
-        float child_scale = stk_scale[sp] * 0.5;
-        vec3 child_offset = stk_offset[sp] + vec3(
-            float(ci & 1),
-            float((ci >> 1) & 1),
-            float((ci >> 2) & 1)
-        ) * child_scale;
-
-        // Quick membership test at child center for pruning
-        vec3 child_center = child_offset + child_scale * 0.5;
-        float child_radius = child_scale * 0.866; // sqrt(3)/2 * scale
-
-        // Prune: if center escapes quickly and cell is small, skip
-        // But we need conservative pruning — only skip if ALL corners would escape
-        // Simple heuristic: test center; if it escapes in 2 iterations, skip
-        bool maybe_member = true;
-        {
-            vec3 z = vec3(0);
-            for (int i = 0; i < min(3, iters); i++) {
-                z = triplex_power(z, pw) + child_center;
-                if (dot(z, z) > 4.0 + child_radius * child_radius * 4.0) {
-                    maybe_member = false;
-                    break;
-                }
-            }
-        }
-
-        if (maybe_member) {
-            float t_near, t_far;
-            if (ray_hits_aabb(mro, mrd, child_offset, child_offset + child_scale,
-                              t_near, t_far)) {
-                if (t_near < closest_t) {
-                    sp++;
-                    stk_offset[sp] = child_offset;
-                    stk_scale [sp] = child_scale;
-                    stk_child [sp] = 0;
-                    stk_depth [sp] = stk_depth[sp - 1] - 1;
-                }
-            }
-        }
+        t += d;
+        if (t > t_end) break;
     }
 
-    if (closest_t >= INF) return INF;
-
-    // Transform t back to world space
-    hit_normal = closest_normal;
-    return closest_t / (1.5 / scale);  // Undo the ray scaling
+    return INF;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
