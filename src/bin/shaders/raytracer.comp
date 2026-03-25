@@ -1,0 +1,245 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba8) uniform writeonly image2D outImage;
+
+layout(push_constant) uniform PushConstants {
+    vec3 eye;       float fov;
+    vec3 forward;   uint width;
+    vec3 right;     uint height;
+    vec3 up;        float time;
+};
+
+#define INF 1e30
+#define EPSILON 0.0001
+#define PI 3.14159265358979
+#define NUM_SPHERES 4
+#define NUM_LIGHTS 2
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scene data — spheres
+// ═══════════════════════════════════════════════════════════════════════════
+struct Sphere {
+    vec3 center;
+    float radius;
+    vec3 color;
+    float specular;
+    float shininess;
+};
+
+struct Light {
+    vec3 position;
+    vec3 color;
+    float intensity;
+};
+
+// Scene objects (matching the CPU ray tracer)
+const Sphere spheres[NUM_SPHERES] = Sphere[NUM_SPHERES](
+    Sphere(vec3(-2.0, 1.0, 5.0),  1.0,  vec3(0.9, 0.15, 0.15), 0.4, 32.0),   // Red
+    Sphere(vec3(0.5,  1.5, 7.0),  1.5,  vec3(0.15, 0.8, 0.2),  0.3, 24.0),   // Green
+    Sphere(vec3(3.0,  0.7, 4.5),  0.7,  vec3(0.2, 0.3, 0.9),   0.6, 64.0),   // Blue
+    Sphere(vec3(-0.5, 0.5, 3.0),  0.5,  vec3(0.95, 0.75, 0.2),  0.5, 48.0)   // Gold
+);
+
+const Light lights[NUM_LIGHTS] = Light[NUM_LIGHTS](
+    Light(vec3(-3.0, 8.0, -2.0), vec3(1.0, 1.0, 1.0),  0.8),
+    Light(vec3(5.0,  5.0,  0.0), vec3(1.0, 0.9, 0.8),  0.4)
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ray-sphere intersection — mirrors verified spec ray_hits_sphere_nodiv
+// ═══════════════════════════════════════════════════════════════════════════
+float intersect_sphere(vec3 ro, vec3 rd, Sphere s) {
+    vec3 oc = ro - s.center;
+    float a = dot(rd, rd);
+    float b = 2.0 * dot(oc, rd);
+    float c = dot(oc, oc) - s.radius * s.radius;
+    float disc = b * b - 4.0 * a * c;
+    if (disc < 0.0) return INF;
+    float sq = sqrt(disc);
+    float t1 = (-b - sq) / (2.0 * a);
+    float t2 = (-b + sq) / (2.0 * a);
+    if (t1 > EPSILON) return t1;
+    if (t2 > EPSILON) return t2;
+    return INF;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ray-plane intersection — mirrors verified spec ray_hits_plane
+// Ground plane at y = 0, normal = (0, 1, 0)
+// ═══════════════════════════════════════════════════════════════════════════
+float intersect_ground(vec3 ro, vec3 rd) {
+    if (abs(rd.y) < EPSILON) return INF;
+    float t = -ro.y / rd.y;
+    return t > EPSILON ? t : INF;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scene traversal — mirrors verified spec scene_closest_hit_index
+// Returns hit_t, sets out params for hit info
+// ═══════════════════════════════════════════════════════════════════════════
+struct HitRecord {
+    float t;
+    vec3 point;
+    vec3 normal;
+    vec3 color;
+    float specular;
+    float shininess;
+    bool is_ground;
+};
+
+HitRecord trace_scene(vec3 ro, vec3 rd) {
+    HitRecord hit;
+    hit.t = INF;
+    hit.is_ground = false;
+
+    // Test spheres
+    for (int i = 0; i < NUM_SPHERES; i++) {
+        float t = intersect_sphere(ro, rd, spheres[i]);
+        if (t < hit.t) {
+            hit.t = t;
+            hit.point = ro + t * rd;
+            hit.normal = normalize(hit.point - spheres[i].center);
+            hit.color = spheres[i].color;
+            hit.specular = spheres[i].specular;
+            hit.shininess = spheres[i].shininess;
+            hit.is_ground = false;
+        }
+    }
+
+    // Test ground plane
+    float t_ground = intersect_ground(ro, rd);
+    if (t_ground < hit.t) {
+        hit.t = t_ground;
+        hit.point = ro + t_ground * rd;
+        hit.normal = vec3(0.0, 1.0, 0.0);
+        hit.specular = 0.05;
+        hit.shininess = 10.0;
+        hit.is_ground = true;
+
+        // Checkerboard pattern
+        float scale = 1.0;
+        int ix = int(floor(hit.point.x * scale));
+        int iz = int(floor(hit.point.z * scale));
+        if (((ix + iz) & 1) == 0) {
+            hit.color = vec3(0.9, 0.9, 0.9);
+        } else {
+            hit.color = vec3(0.3, 0.3, 0.3);
+        }
+    }
+
+    return hit;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shadow test
+// ═══════════════════════════════════════════════════════════════════════════
+bool in_shadow(vec3 origin, vec3 light_pos) {
+    vec3 to_light = light_pos - origin;
+    float dist = length(to_light);
+    vec3 dir = to_light / dist;
+
+    for (int i = 0; i < NUM_SPHERES; i++) {
+        float t = intersect_sphere(origin, dir, spheres[i]);
+        if (t < dist) return true;
+    }
+
+    return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shading — mirrors verified lighting.rs lambertian_clamped
+// ═══════════════════════════════════════════════════════════════════════════
+vec3 shade(HitRecord hit, vec3 rd) {
+    float ambient = 0.1;
+    vec3 color = hit.color * ambient;
+
+    // Offset point to avoid self-intersection
+    vec3 surface_point = hit.point + hit.normal * 0.001;
+
+    for (int i = 0; i < NUM_LIGHTS; i++) {
+        // Shadow test
+        if (in_shadow(surface_point, lights[i].position)) continue;
+
+        vec3 to_light = lights[i].position - hit.point;
+        vec3 light_dir = normalize(to_light);
+
+        // Lambertian diffuse — verified: lambertian_clamped(normal, light_dir)
+        float ndotl = max(dot(hit.normal, light_dir), 0.0);
+        color += hit.color * ndotl * lights[i].intensity * lights[i].color;
+
+        // Blinn-Phong specular
+        vec3 half_dir = normalize(light_dir - rd);
+        float ndoth = max(dot(hit.normal, half_dir), 0.0);
+        float spec = pow(ndoth, hit.shininess) * hit.specular * lights[i].intensity;
+        color += lights[i].color * spec;
+    }
+
+    return color;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Reflection
+// ═══════════════════════════════════════════════════════════════════════════
+vec3 trace_with_reflection(vec3 ro, vec3 rd) {
+    HitRecord hit = trace_scene(ro, rd);
+
+    if (hit.t >= INF) {
+        // Sky gradient
+        float t = 0.5 * (normalize(rd).y + 1.0);
+        return mix(vec3(1.0), vec3(0.4, 0.6, 0.9), t);
+    }
+
+    vec3 color = shade(hit, rd);
+
+    // One bounce reflection for shiny surfaces
+    if (hit.specular > 0.2) {
+        vec3 refl_dir = reflect(rd, hit.normal);
+        vec3 refl_origin = hit.point + hit.normal * 0.001;
+        HitRecord refl_hit = trace_scene(refl_origin, refl_dir);
+
+        vec3 refl_color;
+        if (refl_hit.t < INF) {
+            refl_color = shade(refl_hit, refl_dir);
+        } else {
+            float t = 0.5 * (normalize(refl_dir).y + 1.0);
+            refl_color = mix(vec3(1.0), vec3(0.4, 0.6, 0.9), t);
+        }
+
+        color = mix(color, refl_color, hit.specular * 0.3);
+    }
+
+    return color;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Camera — mirrors verified spec camera_ray
+// ═══════════════════════════════════════════════════════════════════════════
+void generate_ray(uint px, uint py, out vec3 ro, out vec3 rd) {
+    float aspect = float(width) / float(height);
+    float u = (2.0 * (float(px) + 0.5) / float(width)  - 1.0) * aspect;
+    float v =  1.0 - 2.0 * (float(py) + 0.5) / float(height);
+
+    ro = eye;
+    rd = normalize(forward + fov * u * right + fov * v * up);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Main
+// ═══════════════════════════════════════════════════════════════════════════
+void main() {
+    uint px = gl_GlobalInvocationID.x;
+    uint py = gl_GlobalInvocationID.y;
+    if (px >= width || py >= height) return;
+
+    vec3 ro, rd;
+    generate_ray(px, py, ro, rd);
+
+    vec3 color = trace_with_reflection(ro, rd);
+
+    // Tone mapping + gamma correction (sRGB)
+    color = color / (color + vec3(1.0));  // Reinhard
+    color = pow(color, vec3(1.0 / 2.2));
+
+    imageStore(outImage, ivec2(px, py), vec4(color, 1.0));
+}

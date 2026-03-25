@@ -58,10 +58,6 @@ impl Vec3 {
             self.x * rhs.y - self.y * rhs.x,
         )
     }
-    fn reflect(self, normal: Vec3) -> Vec3 {
-        // I - 2 * dot(I, N) * N
-        self.sub(normal.scale(2.0 * self.dot(normal)))
-    }
 }
 
 type Point3 = Vec3;
@@ -300,23 +296,6 @@ fn background(ray: &Ray) -> Color {
 // ═══════════════════════════════════════════════════════════════════════════
 // Trace a single ray
 // ═══════════════════════════════════════════════════════════════════════════
-
-fn trace(ray: &Ray, objects: &[SceneObject], lights: &[PointLight], ambient: f64) -> Color {
-    match closest_hit(ray, objects) {
-        None => background(ray),
-        Some(hit) => {
-            // Ambient contribution
-            let mut color = hit.material.color.scale(ambient);
-
-            // Accumulate light contributions
-            for light in lights {
-                color = color.add(shade(&hit, light, ray.dir, objects));
-            }
-
-            color
-        }
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Camera
