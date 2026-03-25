@@ -1,7 +1,5 @@
 use vstd::prelude::*;
-use verus_algebra::ring::Ring;
-use verus_algebra::ordered_ring::OrderedRing;
-use verus_algebra::ordered_field::OrderedField;
+use verus_algebra::traits::*;
 use verus_linalg::vec3::*;
 
 verus! {
