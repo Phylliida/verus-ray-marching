@@ -10,7 +10,7 @@ verus-linalg = { path = "../verus-linalg" }
 verus-geometry = { path = "../verus-geometry" }
 verus-rational = { path = "../verus-rational" }
 verus-bigint = { path = "../verus-bigint" }
-verus-quadratic-extension = { path = "../verus-quadratic-extension" }
+verus-quadratic-extension = { path = "../verus-quadratic-extension", optional = true }
 verus-cutedsl = { path = "../verus-cutedsl" }
 verus-vulkan = { path = "../verus-vulkan", default-features = false }
 builtin = { package = "verus_builtin", path = "../verus/source/builtin" }
@@ -27,6 +27,11 @@ viewer = ["ash", "winit", "ash-window", "raw-window-handle"]
 [[bin]]
 name = "raytracer"
 path = "src/bin/raytracer.rs"
+
+[[bin]]
+name = "raytracer_viewer"
+path = "src/bin/raytracer_viewer.rs"
+required-features = ["viewer"]
 
 [[bin]]
 name = "menger_viewer"
