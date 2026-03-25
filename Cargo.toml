@@ -25,6 +25,10 @@ raw-window-handle = { version = "0.6", optional = true }
 viewer = ["ash", "winit", "ash-window", "raw-window-handle"]
 
 [[bin]]
+name = "raytracer"
+path = "src/bin/raytracer.rs"
+
+[[bin]]
 name = "menger_viewer"
 path = "src/bin/menger_viewer.rs"
 required-features = ["viewer"]
