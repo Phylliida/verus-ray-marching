@@ -8,7 +8,7 @@ use crate::normals::*;
 
 verus! {
 
-/// Normal at a sphere hit point: hit - center (unnormalized, outward).
+///  Normal at a sphere hit point: hit - center (unnormalized, outward).
 pub fn normal_sphere_exec(hit: &RuntimePoint3, sphere: &RuntimeSphere) -> (out: RuntimeVec3)
     requires
         hit.wf_spec(),
@@ -20,7 +20,7 @@ pub fn normal_sphere_exec(hit: &RuntimePoint3, sphere: &RuntimeSphere) -> (out: 
     sub3_exec(hit, &sphere.center)
 }
 
-/// Normal at a plane hit point: the plane's stored normal.
+///  Normal at a plane hit point: the plane's stored normal.
 pub fn normal_plane_exec(pl: &RuntimePlane) -> (out: RuntimeVec3)
     requires
         pl.wf_spec(),
@@ -35,8 +35,8 @@ pub fn normal_plane_exec(pl: &RuntimePlane) -> (out: RuntimeVec3)
     )
 }
 
-/// Normal at a box hit point: axis-aligned face normal.
-/// face: 0=+x, 1=-x, 2=+y, 3=-y, 4=+z, 5=-z.
+///  Normal at a box hit point: axis-aligned face normal.
+///  face: 0=+x, 1=-x, 2=+y, 3=-y, 4=+z, 5=-z.
 pub fn normal_box_exec(face: u64) -> (out: RuntimeVec3)
     requires
         face <= 5,
@@ -62,8 +62,8 @@ pub fn normal_box_exec(face: u64) -> (out: RuntimeVec3)
     }
 }
 
-/// Normal at a cylinder hit point: radial component perpendicular to axis.
-/// normal = (hit - base) - dot(hit - base, axis) * axis
+///  Normal at a cylinder hit point: radial component perpendicular to axis.
+///  normal = (hit - base) - dot(hit - base, axis) * axis
 pub fn normal_cylinder_exec(hit: &RuntimePoint3, cyl: &RuntimeCylinder) -> (out: RuntimeVec3)
     requires
         hit.wf_spec(),
@@ -78,4 +78,4 @@ pub fn normal_cylinder_exec(hit: &RuntimePoint3, cyl: &RuntimeCylinder) -> (out:
     d.sub_exec(&proj)
 }
 
-} // verus!
+} //  verus!

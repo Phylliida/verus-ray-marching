@@ -10,9 +10,9 @@
 
 use std::io::Write;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Vec3 / Point3 — minimal f64 geometry
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Vec3 / Point3 — minimal f64 geometry
+//  ═══════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy)]
 struct Vec3 {
@@ -62,9 +62,9 @@ impl Vec3 {
 
 type Point3 = Vec3;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Ray
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Ray
+//  ═══════════════════════════════════════════════════════════════════════════
 
 struct Ray {
     origin: Point3,
@@ -77,9 +77,9 @@ impl Ray {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Materials & colors
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Materials & colors
+//  ═══════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Copy)]
 struct Color {
@@ -107,7 +107,7 @@ impl Color {
     }
     fn to_u8(self) -> (u8, u8, u8) {
         let c = self.clamp01();
-        // Gamma correction (sRGB approximate: gamma 2.2)
+        //  Gamma correction (sRGB approximate: gamma 2.2)
         let gamma = 1.0 / 2.2;
         (
             (c.r.powf(gamma) * 255.0 + 0.5) as u8,
@@ -120,13 +120,13 @@ impl Color {
 #[derive(Clone, Copy)]
 struct Material {
     color: Color,
-    specular: f64,    // Specular coefficient [0, 1]
-    shininess: f64,   // Phong exponent
+    specular: f64,    //  Specular coefficient [0, 1]
+    shininess: f64,   //  Phong exponent
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Scene primitives
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Scene primitives
+//  ═══════════════════════════════════════════════════════════════════════════
 
 #[derive(Clone)]
 enum Primitive {
@@ -146,12 +146,12 @@ struct HitRecord {
     material: Material,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Ray intersection — mirrors the verified specs
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Ray intersection — mirrors the verified specs
+//  ═══════════════════════════════════════════════════════════════════════════
 
-/// Ray-sphere intersection (Möller quadratic).
-/// Corresponds to verified spec: ray_hits_sphere_nodiv + quadratic formula.
+///  Ray-sphere intersection (Möller quadratic).
+///  Corresponds to verified spec: ray_hits_sphere_nodiv + quadratic formula.
 fn intersect_sphere(ray: &Ray, center: Point3, radius: f64) -> Option<f64> {
     let oc = ray.origin.sub(center);
     let a = ray.dir.norm_sq();
@@ -173,8 +173,8 @@ fn intersect_sphere(ray: &Ray, center: Point3, radius: f64) -> Option<f64> {
     }
 }
 
-/// Ray-plane intersection.
-/// Corresponds to verified spec: ray_plane_t + ray_hits_plane.
+///  Ray-plane intersection.
+///  Corresponds to verified spec: ray_plane_t + ray_hits_plane.
 fn intersect_plane(ray: &Ray, point: Point3, normal: Vec3) -> Option<f64> {
     let denom = ray.dir.dot(normal);
     if denom.abs() < 1e-12 {
@@ -202,9 +202,9 @@ fn normal_at(point: Point3, prim: &Primitive) -> Vec3 {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Scene traversal
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Scene traversal
+//  ═══════════════════════════════════════════════════════════════════════════
 
 fn closest_hit<'a>(ray: &Ray, objects: &'a [SceneObject]) -> Option<HitRecord> {
     let mut best: Option<HitRecord> = None;
@@ -229,9 +229,9 @@ fn closest_hit<'a>(ray: &Ray, objects: &'a [SceneObject]) -> Option<HitRecord> {
     best
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Shading — mirrors verified lighting.rs specs
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Shading — mirrors verified lighting.rs specs
+//  ═══════════════════════════════════════════════════════════════════════════
 
 struct PointLight {
     position: Point3,
@@ -239,13 +239,13 @@ struct PointLight {
     intensity: f64,
 }
 
-/// Lambertian + Blinn-Phong shading.
-/// The Lambertian component corresponds to the verified spec:
-///   shade = max(0, dot(normal, light_dir))   [lambertian_clamped]
-///   color = material * shade                  [shade_color]
+///  Lambertian + Blinn-Phong shading.
+///  The Lambertian component corresponds to the verified spec:
+///    shade = max(0, dot(normal, light_dir))   [lambertian_clamped]
+///    color = material * shade                  [shade_color]
 ///
-/// Cauchy-Schwarz (lemma_lambertian_cauchy_schwarz) guarantees
-/// that for unit vectors, shade ∈ [0, 1].
+///  Cauchy-Schwarz (lemma_lambertian_cauchy_schwarz) guarantees
+///  that for unit vectors, shade ∈ [0, 1].
 fn shade(
     hit: &HitRecord,
     light: &PointLight,
@@ -256,7 +256,7 @@ fn shade(
     let dist = to_light.norm();
     let light_dir = to_light.normalized();
 
-    // Shadow test: cast ray from hit point toward light
+    //  Shadow test: cast ray from hit point toward light
     let shadow_ray = Ray {
         origin: hit.point.add(hit.normal.scale(1e-4)),
         dir: light_dir,
@@ -264,16 +264,16 @@ fn shade(
     for obj in objects {
         if let Some(t) = intersect(&shadow_ray, &obj.primitive) {
             if t < dist {
-                return Color::new(0.0, 0.0, 0.0); // In shadow
+                return Color::new(0.0, 0.0, 0.0); //  In shadow
             }
         }
     }
 
-    // Lambertian diffuse — verified in lighting.rs as lambertian_clamped
+    //  Lambertian diffuse — verified in lighting.rs as lambertian_clamped
     let ndotl = hit.normal.dot(light_dir).max(0.0);
     let diffuse = hit.material.color.scale(ndotl * light.intensity);
 
-    // Blinn-Phong specular
+    //  Blinn-Phong specular
     let half_dir = light_dir.sub(ray_dir).normalized();
     let ndoth = hit.normal.dot(half_dir).max(0.0);
     let spec_factor = ndoth.powf(hit.material.shininess) * hit.material.specular * light.intensity;
@@ -282,9 +282,9 @@ fn shade(
     diffuse.add(specular)
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Sky gradient background
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Sky gradient background
+//  ═══════════════════════════════════════════════════════════════════════════
 
 fn background(ray: &Ray) -> Color {
     let t = 0.5 * (ray.dir.normalized().y + 1.0);
@@ -293,13 +293,13 @@ fn background(ray: &Ray) -> Color {
     white.scale(1.0 - t).add(sky.scale(t))
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Trace a single ray
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Trace a single ray
+//  ═══════════════════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Camera
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Camera
+//  ═══════════════════════════════════════════════════════════════════════════
 
 struct Camera {
     origin: Point3,
@@ -323,9 +323,9 @@ impl Camera {
         }
     }
 
-    /// Generate a camera ray for pixel (px, py) in an image of size (w, h).
-    /// Maps to normalized coords u, v ∈ [-1, 1].
-    /// Corresponds to verified spec: camera_ray(cam, u, v).
+    ///  Generate a camera ray for pixel (px, py) in an image of size (w, h).
+    ///  Maps to normalized coords u, v ∈ [-1, 1].
+    ///  Corresponds to verified spec: camera_ray(cam, u, v).
     fn ray(&self, px: usize, py: usize, w: usize, h: usize) -> Ray {
         let aspect = w as f64 / h as f64;
         let u = (2.0 * (px as f64 + 0.5) / w as f64 - 1.0) * aspect;
@@ -338,9 +338,9 @@ impl Camera {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Checkerboard pattern for the ground plane
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Checkerboard pattern for the ground plane
+//  ═══════════════════════════════════════════════════════════════════════════
 
 fn checkerboard(point: Point3) -> Color {
     let scale = 1.0;
@@ -353,13 +353,13 @@ fn checkerboard(point: Point3) -> Color {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Scene construction
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Scene construction
+//  ═══════════════════════════════════════════════════════════════════════════
 
 fn build_scene() -> (Vec<SceneObject>, Vec<PointLight>, Camera) {
     let objects = vec![
-        // Ground plane (y = 0)
+        //  Ground plane (y = 0)
         SceneObject {
             primitive: Primitive::Plane {
                 point: Vec3::new(0.0, 0.0, 0.0),
@@ -371,7 +371,7 @@ fn build_scene() -> (Vec<SceneObject>, Vec<PointLight>, Camera) {
                 shininess: 10.0,
             },
         },
-        // Red sphere (left)
+        //  Red sphere (left)
         SceneObject {
             primitive: Primitive::Sphere {
                 center: Vec3::new(-2.0, 1.0, 5.0),
@@ -383,7 +383,7 @@ fn build_scene() -> (Vec<SceneObject>, Vec<PointLight>, Camera) {
                 shininess: 32.0,
             },
         },
-        // Green sphere (center, larger)
+        //  Green sphere (center, larger)
         SceneObject {
             primitive: Primitive::Sphere {
                 center: Vec3::new(0.5, 1.5, 7.0),
@@ -395,7 +395,7 @@ fn build_scene() -> (Vec<SceneObject>, Vec<PointLight>, Camera) {
                 shininess: 24.0,
             },
         },
-        // Blue sphere (right, small)
+        //  Blue sphere (right, small)
         SceneObject {
             primitive: Primitive::Sphere {
                 center: Vec3::new(3.0, 0.7, 4.5),
@@ -407,7 +407,7 @@ fn build_scene() -> (Vec<SceneObject>, Vec<PointLight>, Camera) {
                 shininess: 64.0,
             },
         },
-        // Gold sphere (behind, medium)
+        //  Gold sphere (behind, medium)
         SceneObject {
             primitive: Primitive::Sphere {
                 center: Vec3::new(-0.5, 0.5, 3.0),
@@ -435,18 +435,18 @@ fn build_scene() -> (Vec<SceneObject>, Vec<PointLight>, Camera) {
     ];
 
     let camera = Camera::look_at(
-        Vec3::new(0.0, 3.0, -3.0),   // from
-        Vec3::new(0.5, 1.0, 5.0),    // at
-        Vec3::new(0.0, 1.0, 0.0),    // world up
-        60.0,                          // FOV degrees
+        Vec3::new(0.0, 3.0, -3.0),   //  from
+        Vec3::new(0.5, 1.0, 5.0),    //  at
+        Vec3::new(0.0, 1.0, 0.0),    //  world up
+        60.0,                          //  FOV degrees
     );
 
     (objects, lights, camera)
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Render with checkerboard ground
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Render with checkerboard ground
+//  ═══════════════════════════════════════════════════════════════════════════
 
 fn trace_with_checkerboard(
     ray: &Ray,
@@ -457,7 +457,7 @@ fn trace_with_checkerboard(
     match closest_hit(ray, objects) {
         None => background(ray),
         Some(mut hit) => {
-            // Checkerboard on ground plane
+            //  Checkerboard on ground plane
             if matches!(objects.iter().find(|o| {
                 if let Primitive::Plane { .. } = &o.primitive { true } else { false }
             }), Some(_))
@@ -475,9 +475,9 @@ fn trace_with_checkerboard(
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Main: render and output PPM
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Main: render and output PPM
+//  ═══════════════════════════════════════════════════════════════════════════
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -499,7 +499,7 @@ fn main() {
             let (r, g, b) = color.to_u8();
             writeln!(stdout, "{} {} {}", r, g, b).unwrap();
         }
-        // Progress to stderr
+        //  Progress to stderr
         if py % 50 == 0 {
             eprint!("\rRendering: {:.0}%", 100.0 * py as f64 / height as f64);
         }

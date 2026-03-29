@@ -4,28 +4,28 @@ use verus_linalg::vec3::*;
 
 verus! {
 
-/// Torus centered at `center` with the tube axis along Y.
-/// Major radius R (center of tube to axis), minor radius r (tube radius).
-/// Stored as squared radii to avoid sqrt in spec.
+///  Torus centered at `center` with the tube axis along Y.
+///  Major radius R (center of tube to axis), minor radius r (tube radius).
+///  Stored as squared radii to avoid sqrt in spec.
 pub struct Torus<T: OrderedField> {
     pub center: Vec3<T>,
     pub major_radius_sq: T,
     pub minor_radius_sq: T,
 }
 
-/// Distance squared from point to the Y-axis through the torus center,
-/// projected onto the XZ-plane: (px - cx)^2 + (pz - cz)^2
+///  Distance squared from point to the Y-axis through the torus center,
+///  projected onto the XZ-plane: (px - cx)^2 + (pz - cz)^2
 pub open spec fn xz_dist_sq<T: Ring>(p: Vec3<T>, center: Vec3<T>) -> T {
     let dx = p.x.sub(center.x);
     let dz = p.z.sub(center.z);
     dx.mul(dx).add(dz.mul(dz))
 }
 
-/// A point lies on the torus surface iff:
-///   (sqrt(x^2 + z^2) - R)^2 + y^2 = r^2
-/// Equivalently (squaring to eliminate sqrt):
-///   (x^2 + y^2 + z^2 + R^2 - r^2)^2 = 4 R^2 (x^2 + z^2)
-/// where x,y,z are relative to the torus center.
+///  A point lies on the torus surface iff:
+///    (sqrt(x^2 + z^2) - R)^2 + y^2 = r^2
+///  Equivalently (squaring to eliminate sqrt):
+///    (x^2 + y^2 + z^2 + R^2 - r^2)^2 = 4 R^2 (x^2 + z^2)
+///  where x,y,z are relative to the torus center.
 pub open spec fn point_on_torus<T: OrderedField>(p: Vec3<T>, torus: Torus<T>) -> bool {
     let rel = sub3(p, torus.center);
     let sum_sq = norm_sq3(rel);
@@ -37,9 +37,9 @@ pub open spec fn point_on_torus<T: OrderedField>(p: Vec3<T>, torus: Torus<T>) ->
     lhs.eqv(rhs)
 }
 
-/// Quartic coefficients for the ray-torus intersection.
-/// Substituting ray(t) = o + t*d into the implicit torus equation yields
-/// c4*t^4 + c3*t^3 + c2*t^2 + c1*t + c0 = 0.
+///  Quartic coefficients for the ray-torus intersection.
+///  Substituting ray(t) = o + t*d into the implicit torus equation yields
+///  c4*t^4 + c3*t^3 + c2*t^2 + c1*t + c0 = 0.
 pub open spec fn ray_torus_quartic_c4<T: Ring>(d: Vec3<T>) -> T {
     let dd = dot3(d, d);
     dd.mul(dd)
@@ -92,7 +92,7 @@ pub open spec fn ray_torus_quartic_c0<T: OrderedField>(
         .sub(four.mul(torus.major_radius_sq).mul(oo_xz))
 }
 
-/// Whether a ray intersects the torus (exists non-negative t satisfying the quartic).
+///  Whether a ray intersects the torus (exists non-negative t satisfying the quartic).
 pub open spec fn ray_hits_torus<T: OrderedField>(
     ray: super::types::Ray3<T>, torus: Torus<T>,
 ) -> bool {
@@ -103,4 +103,4 @@ pub open spec fn ray_hits_torus<T: OrderedField>(
         && point_on_torus(add3(ray.origin, scale3(d, t)), torus)
 }
 
-} // verus!
+} //  verus!

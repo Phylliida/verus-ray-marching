@@ -11,11 +11,11 @@ use crate::scene::*;
 
 verus! {
 
-// ---------------------------------------------------------------------------
-// RuntimePrimitive
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimePrimitive
+//  ---------------------------------------------------------------------------
 
-/// Runtime primitive enum mirroring spec Primitive.
+///  Runtime primitive enum mirroring spec Primitive.
 pub enum RuntimePrimitive {
     PrimSphere(RuntimeSphere),
     PrimPlane(RuntimePlane),
@@ -46,11 +46,11 @@ impl RuntimePrimitive {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuntimeSceneObject
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeSceneObject
+//  ---------------------------------------------------------------------------
 
-/// Runtime scene object: primitive + AABB + material ID.
+///  Runtime scene object: primitive + AABB + material ID.
 pub struct RuntimeSceneObject {
     pub primitive: RuntimePrimitive,
     pub aabb: RuntimeBox3,
@@ -75,11 +75,11 @@ impl RuntimeSceneObject {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuntimeCamera
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeCamera
+//  ---------------------------------------------------------------------------
 
-/// Runtime pinhole camera.
+///  Runtime pinhole camera.
 pub struct RuntimeCamera {
     pub origin: RuntimePoint3,
     pub forward: RuntimeVec3,
@@ -108,11 +108,11 @@ impl RuntimeCamera {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ray_hits_primitive_exec
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  ray_hits_primitive_exec
+//  ---------------------------------------------------------------------------
 
-/// Does the ray hit the given primitive?
+///  Does the ray hit the given primitive?
 pub fn ray_hits_primitive_exec(ray: &RuntimeRay3, prim: &RuntimePrimitive) -> (out: bool)
     requires
         ray.wf_spec(),
@@ -136,11 +136,11 @@ pub fn ray_hits_primitive_exec(ray: &RuntimeRay3, prim: &RuntimePrimitive) -> (o
     }
 }
 
-// ---------------------------------------------------------------------------
-// camera_ray_exec
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  camera_ray_exec
+//  ---------------------------------------------------------------------------
 
-/// Generate a camera ray for normalized image coordinates (u, v).
+///  Generate a camera ray for normalized image coordinates (u, v).
 pub fn camera_ray_exec(
     cam: &RuntimeCamera,
     u: &RuntimeRational,
@@ -154,13 +154,13 @@ pub fn camera_ray_exec(
         out.wf_spec(),
         out@ == camera_ray::<RationalModel>(cam@, u@, v@),
 {
-    // dir = forward + u * right + v * up
+    //  dir = forward + u * right + v * up
     let u_right = RuntimeVec3::scale_exec(u, &cam.right);
     let v_up = RuntimeVec3::scale_exec(v, &cam.up);
     let dir1 = cam.forward.add_exec(&u_right);
     let dir = dir1.add_exec(&v_up);
 
-    // Copy origin
+    //  Copy origin
     let origin = RuntimePoint3::new(
         copy_rational(&cam.origin.x),
         copy_rational(&cam.origin.y),
@@ -170,12 +170,12 @@ pub fn camera_ray_exec(
     RuntimeRay3::new(origin, dir)
 }
 
-// ---------------------------------------------------------------------------
-// scene_closest_hit_index_exec — iterative version of spec
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  scene_closest_hit_index_exec — iterative version of spec
+//  ---------------------------------------------------------------------------
 
-/// Find the index of the first hit object in the scene (linear scan).
-/// Mirrors `scene_closest_hit_index` spec but uses an iterative loop.
+///  Find the index of the first hit object in the scene (linear scan).
+///  Mirrors `scene_closest_hit_index` spec but uses an iterative loop.
 pub fn scene_closest_hit_index_exec(
     scene: &Vec<RuntimeSceneObject>,
     ray: &RuntimeRay3,
@@ -203,7 +203,7 @@ pub fn scene_closest_hit_index_exec(
         scene@.map_values(|obj: RuntimeSceneObject| obj@);
 
     proof {
-        // Base case: empty prefix has no hit
+        //  Base case: empty prefix has no hit
         assert(scene_closest_hit_index::<RationalModel>(
             scene_spec.take(0), ray@).is_none());
     }
@@ -215,7 +215,7 @@ pub fn scene_closest_hit_index_exec(
             ray.wf_spec(),
             forall|j: int| 0 <= j < scene@.len() ==>
                 (#[trigger] scene@[j]).wf_spec(),
-            // result mirrors spec on the prefix scene_spec.take(i)
+            //  result mirrors spec on the prefix scene_spec.take(i)
             match result {
                 None => scene_closest_hit_index::<RationalModel>(
                     scene_spec.take(i as int), ray@).is_none(),
@@ -230,8 +230,8 @@ pub fn scene_closest_hit_index_exec(
         let hit = ray_hits_primitive_exec(ray, &scene[i].primitive);
 
         proof {
-            // Relate take(i+1) to take(i) via the spec's recursive structure.
-            // scene_spec.take(i+1).drop_last() == scene_spec.take(i)
+            //  Relate take(i+1) to take(i) via the spec's recursive structure.
+            //  scene_spec.take(i+1).drop_last() == scene_spec.take(i)
             assert(scene_spec.take((i + 1) as int).drop_last() =~= scene_spec.take(i as int));
             assert(scene_spec.take((i + 1) as int).len() == (i + 1) as nat);
             assert(scene_spec.take((i + 1) as int)[(i as int)] == scene_spec[i as int]);
@@ -240,11 +240,11 @@ pub fn scene_closest_hit_index_exec(
         if hit {
             match result {
                 None => {
-                    // First hit — spec would return Some(i) for this prefix
+                    //  First hit — spec would return Some(i) for this prefix
                     result = Some(i);
                 },
                 Some(_prev) => {
-                    // Already have a hit; keep the earlier one (spec picks prev_idx)
+                    //  Already have a hit; keep the earlier one (spec picks prev_idx)
                 },
             }
         }
@@ -253,11 +253,11 @@ pub fn scene_closest_hit_index_exec(
     }
 
     proof {
-        // Final: take(scene.len()) == full sequence
+        //  Final: take(scene.len()) == full sequence
         assert(scene_spec.take(scene@.len() as int) =~= scene_spec);
     }
 
     result
 }
 
-} // verus!
+} //  verus!

@@ -24,9 +24,9 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId, WindowAttributes},
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Vulkan backend
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Vulkan backend
+//  ═══════════════════════════════════════════════════════════════════════════
 
 mod vulkan {
     use super::*;
@@ -82,13 +82,13 @@ mod vulkan {
         _format: vk::Format,
         width: u32,
         height: u32,
-        // Camera
+        //  Camera
         pub eye: [f32; 3],
         pub yaw: f32,
         pub pitch: f32,
         pub fov: f32,
         pub move_speed: f32,
-        // Input
+        //  Input
         pub keys_held: HashSet<KeyCode>,
         pub last_frame_time: Instant,
         pub mouse_captured: bool,
@@ -237,7 +237,7 @@ mod vulkan {
             let image_available_sem = ffi::vk_create_semaphore(&ctx, Ghost::assume_new());
             let render_finished_sem = ffi::vk_create_semaphore(&ctx, Ghost::assume_new());
 
-            // Camera: initial position looking at the scene
+            //  Camera: initial position looking at the scene
             let eye = [0.0f32, 3.0, -3.0];
             let target = [0.5f32, 1.0, 5.0];
             let dx = target[0] - eye[0];
@@ -396,7 +396,7 @@ mod vulkan {
 
             ffi::vk_begin_command_buffer(&self.ctx, cb);
 
-            // UNDEFINED → GENERAL
+            //  UNDEFINED → GENERAL
             ffi::vk_cmd_pipeline_barrier_image(
                 &self.ctx,
                 cb,
@@ -442,7 +442,7 @@ mod vulkan {
             let group_y = (self.height + 15) / 16;
             ffi::vk_cmd_dispatch(&self.ctx, cb, group_x, group_y, 1);
 
-            // GENERAL → PRESENT_SRC_KHR
+            //  GENERAL → PRESENT_SRC_KHR
             ffi::vk_cmd_pipeline_barrier_image(
                 &self.ctx,
                 cb,
@@ -531,9 +531,9 @@ mod vulkan {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Application handler
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Application handler
+//  ═══════════════════════════════════════════════════════════════════════════
 
 struct App {
     window: Option<std::sync::Arc<Window>>,

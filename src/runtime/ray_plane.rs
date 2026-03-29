@@ -9,7 +9,7 @@ use crate::ray_plane::*;
 
 verus! {
 
-/// Compute ray-plane denominator: dot(dir, normal).
+///  Compute ray-plane denominator: dot(dir, normal).
 pub fn ray_plane_denom_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -21,7 +21,7 @@ pub fn ray_plane_denom_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: Runti
     ray.dir.dot_exec(&pl.normal)
 }
 
-/// Compute ray-plane numerator: dot(pl.point - origin, normal).
+///  Compute ray-plane numerator: dot(pl.point - origin, normal).
 pub fn ray_plane_numer_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -34,7 +34,7 @@ pub fn ray_plane_numer_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: Runti
     dot3_exec(&diff, &pl.normal)
 }
 
-/// Compute ray-plane parameter t = numer / denom.
+///  Compute ray-plane parameter t = numer / denom.
 pub fn ray_plane_t_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -49,7 +49,7 @@ pub fn ray_plane_t_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: RuntimeRa
     numer.div(&denom)
 }
 
-/// Does the ray hit the plane?
+///  Does the ray hit the plane?
 pub fn ray_hits_plane_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: bool)
     requires
         ray.wf_spec(),
@@ -66,4 +66,4 @@ pub fn ray_hits_plane_exec(ray: &RuntimeRay3, pl: &RuntimePlane) -> (out: bool)
     !t.lt(&zero)
 }
 
-} // verus!
+} //  verus!
