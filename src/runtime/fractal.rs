@@ -12,11 +12,11 @@ use crate::ray_box::*;
 
 verus! {
 
-// ---------------------------------------------------------------------------
-// RuntimeAffineTransform
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeAffineTransform
+//  ---------------------------------------------------------------------------
 
-/// Runtime affine transform: uniform scale + translate.
+///  Runtime affine transform: uniform scale + translate.
 pub struct RuntimeAffineTransform {
     pub scale: RuntimeRational,
     pub translate: RuntimeVec3,
@@ -39,11 +39,11 @@ impl RuntimeAffineTransform {
     }
 }
 
-// ---------------------------------------------------------------------------
-// inverse_transform_ray_exec
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  inverse_transform_ray_exec
+//  ---------------------------------------------------------------------------
 
-/// Transform a ray into a child's local coordinate system.
+///  Transform a ray into a child's local coordinate system.
 pub fn inverse_transform_ray_exec(
     tf: &RuntimeAffineTransform,
     ray: &RuntimeRay3,
@@ -56,11 +56,11 @@ pub fn inverse_transform_ray_exec(
         out.wf_spec(),
         out@ == inverse_transform_ray::<RationalModel>(tf@, ray@),
 {
-    // inv_s = 1 / scale
+    //  inv_s = 1 / scale
     let inv_s_opt = tf.scale.recip();
     let inv_s = inv_s_opt.unwrap();
 
-    // shifted = sub3(origin, translate_as_point)
+    //  shifted = sub3(origin, translate_as_point)
     let tr_pt = RuntimePoint3::new(
         copy_rational(&tf.translate.x),
         copy_rational(&tf.translate.y),
@@ -68,13 +68,13 @@ pub fn inverse_transform_ray_exec(
     );
     let shifted = sub3_exec(&ray.origin, &tr_pt);
 
-    // new origin: inv_s * shifted.{x,y,z}
+    //  new origin: inv_s * shifted.{x,y,z}
     let ox = inv_s.mul(&shifted.x);
     let oy = inv_s.mul(&shifted.y);
     let oz = inv_s.mul(&shifted.z);
     let new_origin = RuntimePoint3::new(ox, oy, oz);
 
-    // new dir: inv_s * dir.{x,y,z}
+    //  new dir: inv_s * dir.{x,y,z}
     let inv_s2 = copy_rational(&inv_s);
     let inv_s3 = copy_rational(&inv_s);
     let dx = inv_s.mul(&ray.dir.x);
@@ -85,9 +85,9 @@ pub fn inverse_transform_ray_exec(
     RuntimeRay3::new(new_origin, new_dir)
 }
 
-// ---------------------------------------------------------------------------
-// ray_hits_children_exec — mirrors spec ray_hits_children
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  ray_hits_children_exec — mirrors spec ray_hits_children
+//  ---------------------------------------------------------------------------
 
 fn ray_hits_children_exec(
     ray: &RuntimeRay3,
@@ -130,12 +130,12 @@ fn ray_hits_children_exec(
     }
 }
 
-// ---------------------------------------------------------------------------
-// ray_hits_fractal_exec — mirrors spec ray_hits_fractal
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  ray_hits_fractal_exec — mirrors spec ray_hits_fractal
+//  ---------------------------------------------------------------------------
 
-/// Does the ray hit any leaf of the fractal at the given depth?
-/// Recursive descent with AABB pruning.
+///  Does the ray hit any leaf of the fractal at the given depth?
+///  Recursive descent with AABB pruning.
 pub fn ray_hits_fractal_exec(
     ray: &RuntimeRay3,
     transforms: &Vec<RuntimeAffineTransform>,
@@ -163,4 +163,4 @@ pub fn ray_hits_fractal_exec(
     }
 }
 
-} // verus!
+} //  verus!

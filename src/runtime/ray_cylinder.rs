@@ -12,7 +12,7 @@ use crate::ray_cylinder::*;
 
 verus! {
 
-/// Compute the offset vector: ray.origin - cyl.base_center.
+///  Compute the offset vector: ray.origin - cyl.base_center.
 fn rc_offset_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeVec3)
     requires
         ray.wf_spec(),
@@ -24,7 +24,7 @@ fn rc_offset_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeVec3
     sub3_exec(&ray.origin, &cyl.base_center)
 }
 
-/// Compute the perpendicular direction: dir - dot(dir, axis) * axis.
+///  Compute the perpendicular direction: dir - dot(dir, axis) * axis.
 fn rc_perp_dir_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeVec3)
     requires
         ray.wf_spec(),
@@ -38,7 +38,7 @@ fn rc_perp_dir_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeVe
     ray.dir.sub_exec(&proj)
 }
 
-/// Compute the perpendicular offset: oc - dot(oc, axis) * axis.
+///  Compute the perpendicular offset: oc - dot(oc, axis) * axis.
 fn rc_perp_offset_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeVec3)
     requires
         ray.wf_spec(),
@@ -53,7 +53,7 @@ fn rc_perp_offset_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: Runtim
     oc.sub_exec(&proj)
 }
 
-/// Quadratic coefficient A = norm_sq(perp_dir).
+///  Quadratic coefficient A = norm_sq(perp_dir).
 fn rc_quad_a_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -66,7 +66,7 @@ fn rc_quad_a_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRati
     pd.norm_sq_exec()
 }
 
-/// Quadratic coefficient B = 2 * dot(perp_offset, perp_dir).
+///  Quadratic coefficient B = 2 * dot(perp_offset, perp_dir).
 fn rc_quad_b_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -90,7 +90,7 @@ fn rc_quad_b_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRati
     two.mul(&d)
 }
 
-/// Quadratic coefficient C = norm_sq(perp_offset) - radius_sq.
+///  Quadratic coefficient C = norm_sq(perp_offset) - radius_sq.
 fn rc_quad_c_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -104,7 +104,7 @@ fn rc_quad_c_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRati
     nsq.sub(&cyl.radius_sq)
 }
 
-/// Discriminant = B^2 - 4*A*C.
+///  Discriminant = B^2 - 4*A*C.
 fn rc_discriminant_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: RuntimeRational)
     requires
         ray.wf_spec(),
@@ -133,7 +133,7 @@ fn rc_discriminant_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: Runti
     b_sq.sub(&four_ac)
 }
 
-/// Does the ray hit the infinite cylinder? disc >= 0.
+///  Does the ray hit the infinite cylinder? disc >= 0.
 pub fn ray_hits_inf_cylinder_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (out: bool)
     requires
         ray.wf_spec(),
@@ -146,4 +146,4 @@ pub fn ray_hits_inf_cylinder_exec(ray: &RuntimeRay3, cyl: &RuntimeCylinder) -> (
     !disc.lt(&zero)
 }
 
-} // verus!
+} //  verus!

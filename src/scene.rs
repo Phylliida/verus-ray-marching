@@ -7,11 +7,11 @@ use crate::types::*;
 
 verus! {
 
-// ---------------------------------------------------------------------------
-// Primitive enum
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Primitive enum
+//  ---------------------------------------------------------------------------
 
-/// A geometric primitive for ray intersection.
+///  A geometric primitive for ray intersection.
 pub enum Primitive<T: OrderedField> {
     PrimSphere(Sphere<T>),
     PrimPlane(Plane<T>),
@@ -19,22 +19,22 @@ pub enum Primitive<T: OrderedField> {
     PrimCylinder(Cylinder<T>),
 }
 
-// ---------------------------------------------------------------------------
-// Scene object
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Scene object
+//  ---------------------------------------------------------------------------
 
-/// A scene object: a primitive with an AABB for culling and a material ID.
+///  A scene object: a primitive with an AABB for culling and a material ID.
 pub struct SceneObject<T: OrderedField> {
     pub primitive: Primitive<T>,
     pub aabb: Box3<T>,
     pub material_id: nat,
 }
 
-// ---------------------------------------------------------------------------
-// Camera
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Camera
+//  ---------------------------------------------------------------------------
 
-/// A pinhole camera.
+///  A pinhole camera.
 pub struct Camera<T: Ring> {
     pub origin: Point3<T>,
     pub forward: Vec3<T>,
@@ -42,18 +42,18 @@ pub struct Camera<T: Ring> {
     pub up: Vec3<T>,
 }
 
-/// Generate a camera ray for normalized image coordinates (u, v) in [-1, 1].
+///  Generate a camera ray for normalized image coordinates (u, v) in [-1, 1].
 pub open spec fn camera_ray<T: Ring>(cam: Camera<T>, u: T, v: T) -> Ray3<T> {
-    // dir = forward + u * right + v * up
+    //  dir = forward + u * right + v * up
     let dir = cam.forward.add(scale3(u, cam.right)).add(scale3(v, cam.up));
     Ray3 { origin: cam.origin, dir }
 }
 
-// ---------------------------------------------------------------------------
-// Scene traversal (spec)
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Scene traversal (spec)
+//  ---------------------------------------------------------------------------
 
-/// Does the ray hit a given primitive? (Dispatches to per-type tests.)
+///  Does the ray hit a given primitive? (Dispatches to per-type tests.)
 pub open spec fn ray_hits_primitive<T: OrderedField>(
     ray: Ray3<T>, prim: Primitive<T>,
 ) -> bool {
@@ -65,8 +65,8 @@ pub open spec fn ray_hits_primitive<T: OrderedField>(
     }
 }
 
-/// Closest hit among all scene objects (linear scan).
-/// Returns the index of the closest hit object, or None.
+///  Closest hit among all scene objects (linear scan).
+///  Returns the index of the closest hit object, or None.
 pub open spec fn scene_closest_hit_index<T: OrderedField>(
     scene: Seq<SceneObject<T>>, ray: Ray3<T>,
 ) -> Option<nat>
@@ -81,7 +81,7 @@ pub open spec fn scene_closest_hit_index<T: OrderedField>(
             match rest_hit {
                 None => Some(last_idx),
                 Some(prev_idx) => {
-                    // Would compare t values; for now just pick the earlier index
+                    //  Would compare t values; for now just pick the earlier index
                     Some(prev_idx)
                 },
             }
@@ -91,4 +91,4 @@ pub open spec fn scene_closest_hit_index<T: OrderedField>(
     }
 }
 
-} // verus!
+} //  verus!

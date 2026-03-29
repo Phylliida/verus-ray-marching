@@ -9,18 +9,18 @@ use crate::ray_box::*;
 
 verus! {
 
-// ---------------------------------------------------------------------------
-// Affine transform (uniform scale + translate)
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Affine transform (uniform scale + translate)
+//  ---------------------------------------------------------------------------
 
-/// A similarity transform: scale then translate.
-/// Maps point p to scale * p + translate.
+///  A similarity transform: scale then translate.
+///  Maps point p to scale * p + translate.
 pub struct AffineTransform<T: Ring> {
     pub scale: T,
     pub translate: Vec3<T>,
 }
 
-/// Apply the transform to a point.
+///  Apply the transform to a point.
 pub open spec fn transform_point<T: Ring>(tf: AffineTransform<T>, p: Point3<T>) -> Point3<T> {
     let scaled = Point3 {
         x: tf.scale.mul(p.x),
@@ -30,7 +30,7 @@ pub open spec fn transform_point<T: Ring>(tf: AffineTransform<T>, p: Point3<T>) 
     add_vec3(scaled, tf.translate)
 }
 
-/// Apply the transform to an AABB.
+///  Apply the transform to an AABB.
 pub open spec fn transform_aabb<T: OrderedRing>(tf: AffineTransform<T>, b: Box3<T>) -> Box3<T> {
     Box3 {
         min: transform_point(tf, b.min),
@@ -38,18 +38,18 @@ pub open spec fn transform_aabb<T: OrderedRing>(tf: AffineTransform<T>, b: Box3<
     }
 }
 
-/// Transform a ray into a child's local coordinate system.
-/// If the child transform is: child_point = scale * local + translate,
-/// then local = (child_point - translate) / scale.
-/// So the ray in local coords: origin' = (origin - translate) / scale, dir' = dir / scale.
-/// But since we only care about intersection (t is invariant under uniform scaling of both
-/// origin and dir), we can use: origin' = (origin - translate) / scale, dir' = dir.
-/// Actually, for exact intersection we need:
-///   origin_local = (origin - translate) * recip(scale)
-///   dir_local = dir * recip(scale)
-/// But t is the same either way if both are scaled.
-/// Simpler: origin_local = (origin - translate), dir_local = dir, then compare against
-/// the scaled AABB. This avoids division entirely.
+///  Transform a ray into a child's local coordinate system.
+///  If the child transform is: child_point = scale * local + translate,
+///  then local = (child_point - translate) / scale.
+///  So the ray in local coords: origin' = (origin - translate) / scale, dir' = dir / scale.
+///  But since we only care about intersection (t is invariant under uniform scaling of both
+///  origin and dir), we can use: origin' = (origin - translate) / scale, dir' = dir.
+///  Actually, for exact intersection we need:
+///    origin_local = (origin - translate) * recip(scale)
+///    dir_local = dir * recip(scale)
+///  But t is the same either way if both are scaled.
+///  Simpler: origin_local = (origin - translate), dir_local = dir, then compare against
+///  the scaled AABB. This avoids division entirely.
 pub open spec fn inverse_transform_ray<T: OrderedField>(
     tf: AffineTransform<T>, ray: Ray3<T>,
 ) -> Ray3<T>
@@ -71,18 +71,18 @@ pub open spec fn inverse_transform_ray<T: OrderedField>(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Fractal description
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Fractal description
+//  ---------------------------------------------------------------------------
 
-/// A self-similar fractal described by an IFS (iterated function system).
+///  A self-similar fractal described by an IFS (iterated function system).
 pub struct FractalDesc<T: OrderedField> {
     pub transforms: Seq<AffineTransform<T>>,
     pub base_aabb: Box3<T>,
 }
 
-/// The geometry of a fractal at depth N is the union of all leaf AABBs
-/// obtained by recursively applying transforms.
+///  The geometry of a fractal at depth N is the union of all leaf AABBs
+///  obtained by recursively applying transforms.
 pub open spec fn fractal_leaf_aabbs<T: OrderedField>(
     desc: FractalDesc<T>, depth: nat,
 ) -> Seq<Box3<T>>
@@ -92,7 +92,7 @@ pub open spec fn fractal_leaf_aabbs<T: OrderedField>(
         seq![desc.base_aabb]
     } else {
         let children = fractal_leaf_aabbs(desc, (depth - 1) as nat);
-        // Each child AABB gets all transforms applied
+        //  Each child AABB gets all transforms applied
         Seq::new(
             (desc.transforms.len() * children.len()) as nat,
             |i: int| {
@@ -104,12 +104,12 @@ pub open spec fn fractal_leaf_aabbs<T: OrderedField>(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Recursive ray-fractal intersection
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  Recursive ray-fractal intersection
+//  ---------------------------------------------------------------------------
 
-/// Does the ray hit any child from index `from` onward?
-/// Linear scan — avoids `exists` to enable Z3 unfolding in exec proofs.
+///  Does the ray hit any child from index `from` onward?
+///  Linear scan — avoids `exists` to enable Z3 unfolding in exec proofs.
 pub open spec fn ray_hits_children<T: OrderedField>(
     ray: Ray3<T>, desc: FractalDesc<T>, depth: nat, from: nat,
 ) -> bool
@@ -128,8 +128,8 @@ pub open spec fn ray_hits_children<T: OrderedField>(
     }
 }
 
-/// Does the ray hit any leaf of the fractal at the given depth?
-/// Uses AABB pruning at each level of recursion.
+///  Does the ray hit any leaf of the fractal at the given depth?
+///  Uses AABB pruning at each level of recursion.
 pub open spec fn ray_hits_fractal<T: OrderedField>(
     ray: Ray3<T>, desc: FractalDesc<T>, depth: nat,
 ) -> bool
@@ -142,4 +142,4 @@ pub open spec fn ray_hits_fractal<T: OrderedField>(
     }
 }
 
-} // verus!
+} //  verus!

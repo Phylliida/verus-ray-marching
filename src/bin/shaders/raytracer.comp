@@ -16,9 +16,9 @@ layout(push_constant) uniform PushConstants {
 #define NUM_SPHERES 4
 #define NUM_LIGHTS 2
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Scene data — spheres
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Scene data — spheres
+//  ═══════════════════════════════════════════════════════════════════════════
 struct Sphere {
     vec3 center;
     float radius;
@@ -33,12 +33,12 @@ struct Light {
     float intensity;
 };
 
-// Scene objects (matching the CPU ray tracer)
+//  Scene objects (matching the CPU ray tracer)
 const Sphere spheres[NUM_SPHERES] = Sphere[NUM_SPHERES](
-    Sphere(vec3(-2.0, 1.0, 5.0),  1.0,  vec3(0.9, 0.15, 0.15), 0.4, 32.0),   // Red
-    Sphere(vec3(0.5,  1.5, 7.0),  1.5,  vec3(0.15, 0.8, 0.2),  0.3, 24.0),   // Green
-    Sphere(vec3(3.0,  0.7, 4.5),  0.7,  vec3(0.2, 0.3, 0.9),   0.6, 64.0),   // Blue
-    Sphere(vec3(-0.5, 0.5, 3.0),  0.5,  vec3(0.95, 0.75, 0.2),  0.5, 48.0)   // Gold
+    Sphere(vec3(-2.0, 1.0, 5.0),  1.0,  vec3(0.9, 0.15, 0.15), 0.4, 32.0),   //  Red
+    Sphere(vec3(0.5,  1.5, 7.0),  1.5,  vec3(0.15, 0.8, 0.2),  0.3, 24.0),   //  Green
+    Sphere(vec3(3.0,  0.7, 4.5),  0.7,  vec3(0.2, 0.3, 0.9),   0.6, 64.0),   //  Blue
+    Sphere(vec3(-0.5, 0.5, 3.0),  0.5,  vec3(0.95, 0.75, 0.2),  0.5, 48.0)   //  Gold
 );
 
 const Light lights[NUM_LIGHTS] = Light[NUM_LIGHTS](
@@ -46,9 +46,9 @@ const Light lights[NUM_LIGHTS] = Light[NUM_LIGHTS](
     Light(vec3(5.0,  5.0,  0.0), vec3(1.0, 0.9, 0.8),  0.4)
 );
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Ray-sphere intersection — mirrors verified spec ray_hits_sphere_nodiv
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Ray-sphere intersection — mirrors verified spec ray_hits_sphere_nodiv
+//  ═══════════════════════════════════════════════════════════════════════════
 float intersect_sphere(vec3 ro, vec3 rd, Sphere s) {
     vec3 oc = ro - s.center;
     float a = dot(rd, rd);
@@ -64,20 +64,20 @@ float intersect_sphere(vec3 ro, vec3 rd, Sphere s) {
     return INF;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Ray-plane intersection — mirrors verified spec ray_hits_plane
-// Ground plane at y = 0, normal = (0, 1, 0)
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Ray-plane intersection — mirrors verified spec ray_hits_plane
+//  Ground plane at y = 0, normal = (0, 1, 0)
+//  ═══════════════════════════════════════════════════════════════════════════
 float intersect_ground(vec3 ro, vec3 rd) {
     if (abs(rd.y) < EPSILON) return INF;
     float t = -ro.y / rd.y;
     return t > EPSILON ? t : INF;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Scene traversal — mirrors verified spec scene_closest_hit_index
-// Returns hit_t, sets out params for hit info
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Scene traversal — mirrors verified spec scene_closest_hit_index
+//  Returns hit_t, sets out params for hit info
+//  ═══════════════════════════════════════════════════════════════════════════
 struct HitRecord {
     float t;
     vec3 point;
@@ -93,7 +93,7 @@ HitRecord trace_scene(vec3 ro, vec3 rd) {
     hit.t = INF;
     hit.is_ground = false;
 
-    // Test spheres
+    //  Test spheres
     for (int i = 0; i < NUM_SPHERES; i++) {
         float t = intersect_sphere(ro, rd, spheres[i]);
         if (t < hit.t) {
@@ -107,7 +107,7 @@ HitRecord trace_scene(vec3 ro, vec3 rd) {
         }
     }
 
-    // Test ground plane
+    //  Test ground plane
     float t_ground = intersect_ground(ro, rd);
     if (t_ground < hit.t) {
         hit.t = t_ground;
@@ -117,7 +117,7 @@ HitRecord trace_scene(vec3 ro, vec3 rd) {
         hit.shininess = 10.0;
         hit.is_ground = true;
 
-        // Checkerboard pattern
+        //  Checkerboard pattern
         float scale = 1.0;
         int ix = int(floor(hit.point.x * scale));
         int iz = int(floor(hit.point.z * scale));
@@ -131,9 +131,9 @@ HitRecord trace_scene(vec3 ro, vec3 rd) {
     return hit;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Shadow test
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Shadow test
+//  ═══════════════════════════════════════════════════════════════════════════
 bool in_shadow(vec3 origin, vec3 light_pos) {
     vec3 to_light = light_pos - origin;
     float dist = length(to_light);
@@ -147,28 +147,28 @@ bool in_shadow(vec3 origin, vec3 light_pos) {
     return false;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Shading — mirrors verified lighting.rs lambertian_clamped
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Shading — mirrors verified lighting.rs lambertian_clamped
+//  ═══════════════════════════════════════════════════════════════════════════
 vec3 shade(HitRecord hit, vec3 rd) {
     float ambient = 0.1;
     vec3 color = hit.color * ambient;
 
-    // Offset point to avoid self-intersection
+    //  Offset point to avoid self-intersection
     vec3 surface_point = hit.point + hit.normal * 0.001;
 
     for (int i = 0; i < NUM_LIGHTS; i++) {
-        // Shadow test
+        //  Shadow test
         if (in_shadow(surface_point, lights[i].position)) continue;
 
         vec3 to_light = lights[i].position - hit.point;
         vec3 light_dir = normalize(to_light);
 
-        // Lambertian diffuse — verified: lambertian_clamped(normal, light_dir)
+        //  Lambertian diffuse — verified: lambertian_clamped(normal, light_dir)
         float ndotl = max(dot(hit.normal, light_dir), 0.0);
         color += hit.color * ndotl * lights[i].intensity * lights[i].color;
 
-        // Blinn-Phong specular
+        //  Blinn-Phong specular
         vec3 half_dir = normalize(light_dir - rd);
         float ndoth = max(dot(hit.normal, half_dir), 0.0);
         float spec = pow(ndoth, hit.shininess) * hit.specular * lights[i].intensity;
@@ -178,21 +178,21 @@ vec3 shade(HitRecord hit, vec3 rd) {
     return color;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Reflection
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Reflection
+//  ═══════════════════════════════════════════════════════════════════════════
 vec3 trace_with_reflection(vec3 ro, vec3 rd) {
     HitRecord hit = trace_scene(ro, rd);
 
     if (hit.t >= INF) {
-        // Sky gradient
+        //  Sky gradient
         float t = 0.5 * (normalize(rd).y + 1.0);
         return mix(vec3(1.0), vec3(0.4, 0.6, 0.9), t);
     }
 
     vec3 color = shade(hit, rd);
 
-    // One bounce reflection for shiny surfaces
+    //  One bounce reflection for shiny surfaces
     if (hit.specular > 0.2) {
         vec3 refl_dir = reflect(rd, hit.normal);
         vec3 refl_origin = hit.point + hit.normal * 0.001;
@@ -212,9 +212,9 @@ vec3 trace_with_reflection(vec3 ro, vec3 rd) {
     return color;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Camera — mirrors verified spec camera_ray
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Camera — mirrors verified spec camera_ray
+//  ═══════════════════════════════════════════════════════════════════════════
 void generate_ray(uint px, uint py, out vec3 ro, out vec3 rd) {
     float aspect = float(width) / float(height);
     float u = (2.0 * (float(px) + 0.5) / float(width)  - 1.0) * aspect;
@@ -224,9 +224,9 @@ void generate_ray(uint px, uint py, out vec3 ro, out vec3 rd) {
     rd = normalize(forward + fov * u * right + fov * v * up);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Main
-// ═══════════════════════════════════════════════════════════════════════════
+//  ═══════════════════════════════════════════════════════════════════════════
+//  Main
+//  ═══════════════════════════════════════════════════════════════════════════
 void main() {
     uint px = gl_GlobalInvocationID.x;
     uint py = gl_GlobalInvocationID.y;
@@ -237,8 +237,8 @@ void main() {
 
     vec3 color = trace_with_reflection(ro, rd);
 
-    // Tone mapping + gamma correction (sRGB)
-    color = color / (color + vec3(1.0));  // Reinhard
+    //  Tone mapping + gamma correction (sRGB)
+    color = color / (color + vec3(1.0));  //  Reinhard
     color = pow(color, vec3(1.0 / 2.2));
 
     imageStore(outImage, ivec2(px, py), vec4(color, 1.0));

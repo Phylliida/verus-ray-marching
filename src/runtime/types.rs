@@ -7,11 +7,11 @@ use crate::types::*;
 
 verus! {
 
-// ---------------------------------------------------------------------------
-// RuntimeRay3
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeRay3
+//  ---------------------------------------------------------------------------
 
-/// Runtime ray: origin (Point3) + direction (Vec3) with ghost spec model.
+///  Runtime ray: origin (Point3) + direction (Vec3) with ghost spec model.
 pub struct RuntimeRay3 {
     pub origin: RuntimePoint3,
     pub dir: RuntimeVec3,
@@ -47,11 +47,11 @@ impl RuntimeRay3 {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuntimeSphere
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeSphere
+//  ---------------------------------------------------------------------------
 
-/// Runtime sphere: center + squared radius.
+///  Runtime sphere: center + squared radius.
 pub struct RuntimeSphere {
     pub center: RuntimePoint3,
     pub radius_sq: RuntimeRational,
@@ -87,11 +87,11 @@ impl RuntimeSphere {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuntimePlane
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimePlane
+//  ---------------------------------------------------------------------------
 
-/// Runtime plane: point + normal.
+///  Runtime plane: point + normal.
 pub struct RuntimePlane {
     pub point: RuntimePoint3,
     pub normal: RuntimeVec3,
@@ -127,11 +127,11 @@ impl RuntimePlane {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuntimeBox3
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeBox3
+//  ---------------------------------------------------------------------------
 
-/// Runtime AABB: min + max points.
+///  Runtime AABB: min + max points.
 pub struct RuntimeBox3 {
     pub min: RuntimePoint3,
     pub max: RuntimePoint3,
@@ -167,11 +167,11 @@ impl RuntimeBox3 {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RuntimeCylinder
-// ---------------------------------------------------------------------------
+//  ---------------------------------------------------------------------------
+//  RuntimeCylinder
+//  ---------------------------------------------------------------------------
 
-/// Runtime cylinder: base center, axis direction, squared radius, half-height.
+///  Runtime cylinder: base center, axis direction, squared radius, half-height.
 pub struct RuntimeCylinder {
     pub base_center: RuntimePoint3,
     pub axis_dir: RuntimeVec3,
@@ -227,4 +227,4 @@ impl RuntimeCylinder {
     }
 }
 
-} // verus!
+} //  verus!
