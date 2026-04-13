@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-vstd = { path = "../verus/source/vstd" }
+vstd = { path = "../verus-dev/source/vstd" }
 verus-algebra = { path = "../verus-algebra" }
 verus-linalg = { path = "../verus-linalg" }
 verus-geometry = { path = "../verus-geometry" }
@@ -13,7 +13,7 @@ verus-bigint = { path = "../verus-bigint" }
 verus-quadratic-extension = { path = "../verus-quadratic-extension", optional = true }
 verus-cutedsl = { path = "../verus-cutedsl" }
 verus-vulkan = { path = "../verus-vulkan", default-features = false }
-builtin = { package = "verus_builtin", path = "../verus/source/builtin" }
+builtin = { package = "verus_builtin", path = "../verus-dev/source/builtin" }
 
 # Windowing deps (for viewer binaries)
 ash = { version = "0.38", optional = true }
